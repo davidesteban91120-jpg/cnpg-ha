@@ -1,0 +1,4 @@
+## Append samples of your project ##
+resources:
+- ha_v1alpha1_hacluster.yaml
+# +kubebuilder:scaffold:manifestskustomizesamples

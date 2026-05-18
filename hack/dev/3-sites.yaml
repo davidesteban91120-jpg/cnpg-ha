@@ -1,0 +1,74 @@
+# Manifests de test : 3 namespaces (site-a, site-b, site-c) + 3 CNPG Clusters
+# indépendants. Pas de réplication CNPG entre eux (hors scope de ce test).
+# Le but est d'exercer la logique d'observation de notre opérateur HACluster.
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: db
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: site-a
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: site-b
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: site-c
+---
+apiVersion: postgresql.cnpg.io/v1
+kind: Cluster
+metadata:
+  name: pg-prod
+  namespace: site-a
+spec:
+  instances: 1
+  storage:
+    size: 256Mi
+  resources:
+    requests:
+      memory: "128Mi"
+      cpu: "50m"
+    limits:
+      memory: "512Mi"
+      cpu: "500m"
+---
+apiVersion: postgresql.cnpg.io/v1
+kind: Cluster
+metadata:
+  name: pg-prod
+  namespace: site-b
+spec:
+  instances: 1
+  storage:
+    size: 256Mi
+  resources:
+    requests:
+      memory: "128Mi"
+      cpu: "50m"
+    limits:
+      memory: "512Mi"
+      cpu: "500m"
+---
+apiVersion: postgresql.cnpg.io/v1
+kind: Cluster
+metadata:
+  name: pg-prod
+  namespace: site-c
+spec:
+  instances: 1
+  storage:
+    size: 256Mi
+  resources:
+    requests:
+      memory: "128Mi"
+      cpu: "50m"
+    limits:
+      memory: "512Mi"
+      cpu: "500m"

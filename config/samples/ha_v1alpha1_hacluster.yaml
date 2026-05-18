@@ -1,0 +1,38 @@
+apiVersion: ha.ha.cnpg.io/v1alpha1
+kind: HACluster
+metadata:
+  name: prod-db
+  namespace: site-a
+  labels:
+    app.kubernetes.io/name: cnpg-ha
+    app.kubernetes.io/managed-by: kustomize
+spec:
+  primary:
+    name: site-a
+    clusterRef:
+      name: pg-prod
+      namespace: site-a
+    replicationEndpoint: pg-prod-rw.site-a.svc.cluster.local
+  replicas:
+    - name: site-b
+      kubeconfigSecretRef:
+        name: site-b-kubeconfig
+        key: kubeconfig
+      clusterRef:
+        name: pg-prod
+        namespace: site-b
+      replicationEndpoint: pg-prod-rw.site-b.svc.cluster.local
+    - name: site-c
+      kubeconfigSecretRef:
+        name: site-c-kubeconfig
+        key: kubeconfig
+      clusterRef:
+        name: pg-prod
+        namespace: site-c
+      replicationEndpoint: pg-prod-rw.site-c.svc.cluster.local
+  failover:
+    mode: Manual
+    healthCheckIntervalSeconds: 10
+    failureThreshold: 3
+    promotionPolicy: MostAdvancedLSN
+    rejoinPolicy: Manual

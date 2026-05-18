@@ -1,0 +1,34 @@
+# HACluster de test pointant sur le setup 3-sites.yaml.
+# Note : site-a est déclaré primary, site-b/site-c sont replicas avec
+# kubeconfig Secrets pointant tous sur le même KinD (simulation cross-cluster).
+apiVersion: ha.ha.cnpg.io/v1alpha1
+kind: HACluster
+metadata:
+  name: prod-db
+  namespace: db
+spec:
+  primary:
+    name: site-a
+    clusterRef:
+      name: pg-prod
+      namespace: site-a
+  replicas:
+    - name: site-b
+      kubeconfigSecretRef:
+        name: site-b-kubeconfig
+        key: kubeconfig
+      clusterRef:
+        name: pg-prod
+        namespace: site-b
+    - name: site-c
+      kubeconfigSecretRef:
+        name: site-c-kubeconfig
+        key: kubeconfig
+      clusterRef:
+        name: pg-prod
+        namespace: site-c
+  failover:
+    mode: Manual
+    healthCheckIntervalSeconds: 10
+    failureThreshold: 3
+    promotionPolicy: MostAdvancedLSN

@@ -1,0 +1,44 @@
+# ServiceAccount + RBAC + token Secret pour générer un kubeconfig
+# "in-cluster" utilisable par l'opérateur quand il tourne comme Pod.
+# La SA n'a que les droits minimaux pour lire les CR CNPG Cluster
+# cluster-wide (cohérent avec CONVENTION.md / ARCHITECTURE.md §4.2).
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: hacluster-remote-reader
+  namespace: db
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: hacluster-remote-reader
+rules:
+  - apiGroups: ["postgresql.cnpg.io"]
+    resources: ["clusters"]
+    verbs: ["get", "list", "watch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: hacluster-remote-reader
+subjects:
+  - kind: ServiceAccount
+    name: hacluster-remote-reader
+    namespace: db
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: hacluster-remote-reader
+---
+# Secret de type SA-token pour obtenir un token long-lived (sinon K8s ≥ 1.24
+# génère uniquement des tokens via TokenRequest, time-bound et complexes
+# à embarquer dans un kubeconfig statique).
+apiVersion: v1
+kind: Secret
+metadata:
+  name: hacluster-remote-reader-token
+  namespace: db
+  annotations:
+    kubernetes.io/service-account.name: hacluster-remote-reader
+type: kubernetes.io/service-account-token
