@@ -116,7 +116,7 @@ jobs:
           cache-to: type=gha,mode=max
 
       - name: Trivy scan (image)
-        uses: aquasecurity/trivy-action@0.24.0
+        uses: aquasecurity/trivy-action@0.36.0
         with:
           image-ref: ${{ fromJSON(steps.meta.outputs.json).tags[0] }}
           format: sarif
@@ -127,11 +127,18 @@ jobs:
           exit-code: "1"
 
       - name: Upload Trivy SARIF
-        if: always()
+        if: ${{ always() && !github.event.repository.private }}
         uses: github/codeql-action/upload-sarif@v3
         with:
           sarif_file: trivy-image.sarif
           category: trivy-image
+      - name: Upload Trivy SARIF (artifact, private-repo fallback)
+        if: ${{ always() && github.event.repository.private }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: trivy-image-sarif
+          path: trivy-image.sarif
+          if-no-files-found: ignore
 
       - name: Install Cosign
         if: github.event_name != 'pull_request'

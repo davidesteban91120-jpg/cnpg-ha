@@ -17,6 +17,12 @@ permissions: read-all
 jobs:
   analysis:
     name: scorecard analysis
+    # Scorecard requires a public repository (its GitHub App and the public
+    # dashboard at securityscorecards.dev only index public repos). The job is
+    # skipped while the repo is private; once it is flipped to public the next
+    # push triggers a full scan. Remove this guard if you subscribe to
+    # Scorecard Enterprise for private repos.
+    if: ${{ github.event.repository.visibility == 'public' }}
     runs-on: ubuntu-latest
     permissions:
       security-events: write

@@ -28,7 +28,10 @@ import (
 	"github.com/davidesteban/cnpg-ha/internal/remoteclient"
 )
 
-const siteB = "site-b"
+const (
+	siteB = "site-b"
+	siteC = "site-c"
+)
 
 // autoFixture wires a reconciler in Automatic mode with site-a as the
 // declared primary and site-b/site-c as replicas. The hub omits site-a's
@@ -82,7 +85,7 @@ func newAutoFixture(t *testing.T, threshold int32, primaryDown bool, replicas []
 
 	remObjs := make([]client.Object, 0, 2+len(replicas))
 	// CNPG-managed -rw Services that FlipCiliumService targets on promotion.
-	remObjs = append(remObjs, newServiceForTest(siteB), newServiceForTest("site-c"))
+	remObjs = append(remObjs, newServiceForTest(siteB), newServiceForTest(siteC))
 	for _, o := range replicas {
 		remObjs = append(remObjs, o)
 	}
@@ -139,9 +142,9 @@ func TestAutomaticFailover_UsesStatusCurrentPrimaryAsOldPrimary(t *testing.T) {
 			ReplicationEndpoint: siteBEndpoint,
 		},
 		{
-			Name:                "site-c",
+			Name:                siteC,
 			KubeconfigSecretRef: secretRef,
-			ClusterRef:          hav1alpha1.ClusterRef{Name: "pg-prod", Namespace: "site-c"},
+			ClusterRef:          hav1alpha1.ClusterRef{Name: "pg-prod", Namespace: siteC},
 			ReplicationEndpoint: siteCEndpoint,
 		},
 	}
@@ -151,7 +154,7 @@ func TestAutomaticFailover_UsesStatusCurrentPrimaryAsOldPrimary(t *testing.T) {
 	// no-op before the threshold is reached.
 	tb := true
 	siteBPrimaryUnhealthy := newCNPGClusterForTest(siteB, nil, 0)
-	siteCReplica := newCNPGClusterForTest("site-c", &tb, 1)
+	siteCReplica := newCNPGClusterForTest(siteC, &tb, 1)
 	if err := unstructured.SetNestedField(siteCReplica.Object, "src", "spec", "replica", "source"); err != nil {
 		t.Fatalf("set replica source: %v", err)
 	}
@@ -180,8 +183,8 @@ func TestAutomaticFailover_UsesStatusCurrentPrimaryAsOldPrimary(t *testing.T) {
 	}
 	f.reconcile(t) // 2/2: promote site-c, demote/fence site-b.
 
-	if cp := f.currentPrimary(t); cp != "site-c" {
-		t.Fatalf("currentPrimary after failover: got %q, want site-c", cp)
+	if cp := f.currentPrimary(t); cp != siteC {
+		t.Fatalf("currentPrimary after failover: got %q, want %q", cp, siteC)
 	}
 
 	oldPrimary := &unstructured.Unstructured{}
@@ -195,7 +198,7 @@ func TestAutomaticFailover_UsesStatusCurrentPrimaryAsOldPrimary(t *testing.T) {
 
 	newPrimary := &unstructured.Unstructured{}
 	newPrimary.SetGroupVersionKind(cnpgClusterGVK)
-	if err := f.rem.Get(ctx, types.NamespacedName{Namespace: "site-c", Name: "pg-prod"}, newPrimary); err != nil {
+	if err := f.rem.Get(ctx, types.NamespacedName{Namespace: siteC, Name: "pg-prod"}, newPrimary); err != nil {
 		t.Fatalf("get new primary: %v", err)
 	}
 	enabled, _, _ := unstructured.NestedBool(newPrimary.Object, "spec", "replica", "enabled")
@@ -271,11 +274,11 @@ func TestAutomaticFailover(t *testing.T) {
 		// Two replicas both observed as CNPG-primary + ready → split-brain.
 		repSpec := []hav1alpha1.ReplicaSite{
 			{Name: siteB, KubeconfigSecretRef: secretRef, ClusterRef: hav1alpha1.ClusterRef{Name: "pg-prod", Namespace: siteB}},
-			{Name: "site-c", KubeconfigSecretRef: secretRef, ClusterRef: hav1alpha1.ClusterRef{Name: "pg-prod", Namespace: "site-c"}},
+			{Name: siteC, KubeconfigSecretRef: secretRef, ClusterRef: hav1alpha1.ClusterRef{Name: "pg-prod", Namespace: siteC}},
 		}
 		// remote client serves both site-b and site-c CNPG as primaries.
 		bPrim := newCNPGClusterForTest(siteB, nil, 1)
-		cPrim := newCNPGClusterForTest("site-c", nil, 1)
+		cPrim := newCNPGClusterForTest(siteC, nil, 1)
 		f := newAutoFixture(t, 2, true, []*unstructured.Unstructured{bPrim, cPrim}, repSpec)
 
 		f.reconcile(t)
