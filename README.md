@@ -10,6 +10,7 @@ Opérateur Kubernetes pour la **bascule automatique multi-cluster** de bases Pos
 | [docs/EXPLAIN.md](docs/EXPLAIN.md) | Comprendre le **pourquoi** (CNPG, replica cluster, RTO/RPO) |
 | [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | Comprendre le **comment** (composants, Reconcile, RBAC) |
 | [docs/CONVENTION.md](docs/CONVENTION.md) | Règles de code Go + conventions projet |
+| [docs/SUPPLY_CHAIN.md](docs/SUPPLY_CHAIN.md) | Pipeline supply chain : SBOM, Cosign, SLSA, vérifications |
 
 ## Getting Started
 

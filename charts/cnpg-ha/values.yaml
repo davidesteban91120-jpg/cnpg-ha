@@ -1,0 +1,236 @@
+# -- Default values for cnpg-ha.
+# This is a YAML-formatted file. Comments starting with `# --` are picked up
+# by helm-docs and turned into README documentation.
+
+# -- Number of manager replicas. Use >= 2 with `manager.leaderElect=true`
+# for high availability (only one will be active leader at a time).
+replicaCount: 1
+
+# -- Override the chart name used as a building block for object names.
+nameOverride: ""
+# -- Override the fully qualified app name (release-name + chart name).
+fullnameOverride: ""
+
+# -- Labels added to every resource managed by the chart.
+commonLabels: {}
+# -- Annotations added to every resource managed by the chart.
+commonAnnotations: {}
+
+image:
+  # -- Container image repository.
+  repository: controller
+  # -- Image tag. Defaults to `.Chart.AppVersion` when empty.
+  tag: ""
+  # -- Image pull policy.
+  pullPolicy: IfNotPresent
+  # -- Pull secrets used to fetch the controller image.
+  pullSecrets: []
+
+serviceAccount:
+  # -- Create a dedicated ServiceAccount for the controller.
+  create: true
+  # -- Name of an existing ServiceAccount to use. Required when `create=false`.
+  name: ""
+  # -- Annotations applied to the ServiceAccount (e.g. IRSA / Workload Identity).
+  annotations: {}
+  # -- Mount the SA token into the controller pod (needed for K8s API + leader election).
+  automountToken: true
+
+rbac:
+  # -- Create the ClusterRole/Role and bindings the controller needs.
+  # Disable only if you manage RBAC out-of-band.
+  create: true
+
+crds:
+  # -- Install the HACluster CRD as part of the release. Disable if the CRD
+  # is managed externally (e.g. GitOps pipeline). When `keep=true` the CRD
+  # is annotated with `helm.sh/resource-policy: keep` so `helm uninstall`
+  # does NOT delete it (data-loss safety).
+  install: true
+  # -- Keep the CRD on `helm uninstall` (recommended in production).
+  keep: true
+
+manager:
+  # -- Enable controller-runtime leader election. Required when `replicaCount > 1`.
+  leaderElect: true
+  # -- Enable HTTP/2 for the metrics and webhook servers. Disabled by default
+  # to avoid GHSA-qppj-fm5r-hxr3 / GHSA-4374-p667-p6c8.
+  enableHTTP2: false
+
+log:
+  # -- zap log level. One of `debug`, `info`, `warn`, `error`, `dpanic`, `panic`, `fatal`.
+  level: info
+  # -- zap encoder. `json` for production, `console` for human-readable dev logs.
+  encoder: json
+  # -- zap time encoding. `epoch | millis | nano | iso8601 | rfc3339 | rfc3339nano`.
+  timeEncoding: iso8601
+  # -- Threshold at which a stacktrace is captured. Same scale as `log.level`.
+  stacktraceLevel: error
+  # -- Enable zap dev mode (sampling off, colored output, panic stacktraces).
+  # Pairs well with `encoder: console`.
+  devel: false
+
+metrics:
+  # -- Expose the controller-runtime metrics endpoint.
+  enabled: true
+  # -- Address the metrics endpoint binds to inside the pod.
+  bindAddress: ":8443"
+  # -- Serve metrics over HTTPS with authn/authz filter.
+  # When `false`, set `bindAddress: :8080` and remove the TokenReview/SAR RBAC.
+  secure: true
+  service:
+    # -- Create a Service for the metrics endpoint.
+    enabled: true
+    # -- Service type (`ClusterIP`, `NodePort`, `LoadBalancer`).
+    type: ClusterIP
+    # -- Service port exposed to scrapers.
+    port: 8443
+    # -- Annotations applied to the metrics Service.
+    annotations: {}
+  serviceMonitor:
+    # -- Create a Prometheus Operator ServiceMonitor.
+    enabled: false
+    # -- Namespace the ServiceMonitor is created in (defaults to the release namespace).
+    namespace: ""
+    # -- Extra labels for the ServiceMonitor (e.g. `release: kube-prometheus-stack`).
+    additionalLabels: {}
+    # -- Scrape interval.
+    interval: 30s
+    # -- Scrape timeout.
+    scrapeTimeout: 10s
+    # -- Skip TLS certificate verification. Set to `false` and provide certs
+    # via cert-manager for production.
+    insecureSkipVerify: true
+    # -- Prometheus relabelings applied before metric ingestion.
+    relabelings: []
+    # -- Prometheus metric relabelings applied after scraping.
+    metricRelabelings: []
+
+health:
+  # -- Address the /healthz and /readyz endpoints bind to.
+  bindAddress: ":8081"
+  liveness:
+    initialDelaySeconds: 15
+    periodSeconds: 20
+    timeoutSeconds: 1
+    failureThreshold: 3
+    successThreshold: 1
+  readiness:
+    initialDelaySeconds: 5
+    periodSeconds: 10
+    timeoutSeconds: 1
+    failureThreshold: 3
+    successThreshold: 1
+
+# -- Webhook support. Disabled by default — the controller does not currently
+# expose any conversion/admission webhook. Enable only if you provision certs
+# (e.g. via cert-manager) and mount them through `extraVolumes` /
+# `extraVolumeMounts`.
+webhook:
+  enabled: false
+  certPath: ""
+  certName: tls.crt
+  certKey: tls.key
+
+# -- Container resource requests / limits. Defaults match the Kustomize baseline;
+# adjust upwards for production with many HAClusters.
+resources:
+  limits:
+    cpu: 500m
+    memory: 128Mi
+  requests:
+    cpu: 10m
+    memory: 64Mi
+
+# -- Pod-level securityContext. Defaults satisfy the Pod Security Standard "restricted" profile.
+podSecurityContext:
+  runAsNonRoot: true
+  seccompProfile:
+    type: RuntimeDefault
+
+# -- Container-level securityContext.
+securityContext:
+  readOnlyRootFilesystem: true
+  allowPrivilegeEscalation: false
+  capabilities:
+    drop:
+      - ALL
+
+# -- Node selector applied to the controller pod.
+nodeSelector: {}
+
+# -- Tolerations applied to the controller pod.
+tolerations: []
+
+# -- Pod anti-affinity preset for spreading replicas. One of `none`, `soft`, `hard`.
+# `soft` = preferredDuringScheduling on `kubernetes.io/hostname`.
+# `hard` = requiredDuringScheduling on `kubernetes.io/hostname` (refuses to schedule
+# on a node that already runs a controller pod). Ignored when `affinity` is non-empty.
+podAntiAffinityPreset: soft
+
+# -- Full `affinity` override. When non-empty, replaces the preset entirely.
+affinity: {}
+
+# -- Pod topology spread constraints (multi-zone HA).
+topologySpreadConstraints: []
+
+# -- PriorityClass for the controller pod (e.g. `system-cluster-critical`).
+priorityClassName: ""
+
+# -- Extra labels applied to the controller pod.
+podLabels: {}
+
+# -- Extra annotations applied to the controller pod (e.g. for Vault/SecretsStore).
+podAnnotations: {}
+
+# -- Deployment update strategy.
+updateStrategy:
+  type: RollingUpdate
+  rollingUpdate:
+    maxSurge: 1
+    maxUnavailable: 0
+
+# -- Number of old ReplicaSets to retain.
+revisionHistoryLimit: 10
+
+# -- Grace period before forced pod termination.
+terminationGracePeriodSeconds: 10
+
+# -- DNS policy / config for the controller pod.
+dnsPolicy: ClusterFirst
+dnsConfig: {}
+
+# -- Extra `/etc/hosts` entries.
+hostAliases: []
+
+# -- Init containers added to the controller pod.
+initContainers: []
+
+# -- Extra args appended to the manager binary. Escape hatch for flags this
+# chart does not yet template (e.g. experimental flags).
+extraArgs: []
+
+# -- Extra environment variables for the manager container.
+# Example: `- name: GOMAXPROCS; value: "2"`.
+extraEnv: []
+
+# -- Extra `envFrom` entries (ConfigMap/Secret references).
+extraEnvFrom: []
+
+# -- Extra volumes attached to the controller pod (e.g. webhook certs).
+extraVolumes: []
+
+# -- Extra volumeMounts inside the manager container.
+extraVolumeMounts: []
+
+networkPolicy:
+  # -- Restrict ingress to the metrics endpoint via a NetworkPolicy.
+  enabled: false
+  # -- Namespace selector for pods allowed to scrape metrics.
+  # By default: any namespace labeled `metrics: enabled`.
+  metricsAllowedNamespaceSelector:
+    matchLabels:
+      metrics: enabled
+  # -- Pod selector (within the allowed namespaces) for scrape clients.
+  # Empty = allow all pods in the matching namespaces.
+  metricsAllowedPodSelector: {}

@@ -1,0 +1,83 @@
+# Publish the Helm chart as an OCI artifact under ghcr.io and sign it with
+# Cosign keyless. Triggered on tag v* — the chart Version is taken from
+# Chart.yaml (must match the tag minus the leading 'v').
+#
+# Verify a published chart:
+#   helm pull oci://ghcr.io/<owner>/charts/cnpg-ha --version <ver>
+#   cosign verify ghcr.io/<owner>/charts/cnpg-ha:<ver> \
+#     --certificate-identity-regexp "^https://github.com/<owner>/cnpg-ha/" \
+#     --certificate-oidc-issuer https://token.actions.githubusercontent.com
+name: helm-publish
+
+on:
+  push:
+    tags: ["v*.*.*"]
+  workflow_dispatch:
+
+concurrency:
+  group: helm-publish-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+env:
+  CHART_DIR: charts/cnpg-ha
+  REGISTRY: ghcr.io
+  OCI_PATH: ghcr.io/${{ github.repository_owner }}/charts
+
+jobs:
+  publish:
+    name: helm package + push + sign
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Helm
+        uses: azure/setup-helm@v4
+
+      - name: Lint chart (strict)
+        run: helm lint "$CHART_DIR" --strict
+
+      - name: Verify chart version matches git tag
+        run: |
+          chart_ver=$(grep '^version:' "$CHART_DIR/Chart.yaml" | awk '{print $2}')
+          tag_ver="${GITHUB_REF_NAME#v}"
+          if [ "$chart_ver" != "$tag_ver" ]; then
+            echo "::error::Chart.yaml version ($chart_ver) does not match git tag ($tag_ver)"
+            exit 1
+          fi
+
+      - name: Log in to ghcr.io (Helm OCI)
+        run: |
+          echo "${{ secrets.GITHUB_TOKEN }}" | \
+            helm registry login -u "${{ github.actor }}" --password-stdin "$REGISTRY"
+
+      - name: Package chart
+        run: |
+          mkdir -p dist
+          helm package "$CHART_DIR" -d dist/
+
+      - name: Push chart to OCI registry
+        id: push
+        run: |
+          pkg=$(ls dist/cnpg-ha-*.tgz | head -1)
+          out=$(helm push "$pkg" "oci://$OCI_PATH" 2>&1)
+          echo "$out"
+          digest=$(echo "$out" | awk -F': ' '/Digest:/ {print $2}')
+          echo "digest=$digest" >> "$GITHUB_OUTPUT"
+          echo "ref=$OCI_PATH/cnpg-ha:${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+
+      - name: Install Cosign
+        uses: sigstore/cosign-installer@v3.7.0
+
+      - name: Cosign sign (keyless)
+        env:
+          REF: ${{ steps.push.outputs.ref }}
+          DIGEST: ${{ steps.push.outputs.digest }}
+        run: |
+          cosign sign --yes "${REF}@${DIGEST}"

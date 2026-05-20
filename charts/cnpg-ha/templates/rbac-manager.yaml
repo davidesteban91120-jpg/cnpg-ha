@@ -1,0 +1,45 @@
+{{- if .Values.rbac.create -}}
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ include "cnpg-ha.fullname" . }}-manager-role
+  labels:
+    {{- include "cnpg-ha.labels" . | nindent 4 }}
+rules:
+  - apiGroups: [""]
+    resources: ["secrets"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: [""]
+    resources: ["services"]
+    verbs: ["get", "list", "patch", "update", "watch"]
+  - apiGroups: ["", "events.k8s.io"]
+    resources: ["events"]
+    verbs: ["create", "patch"]
+  - apiGroups: ["ha.ha.cnpg.io"]
+    resources: ["haclusters"]
+    verbs: ["create", "delete", "get", "list", "patch", "update", "watch"]
+  - apiGroups: ["ha.ha.cnpg.io"]
+    resources: ["haclusters/finalizers"]
+    verbs: ["update"]
+  - apiGroups: ["ha.ha.cnpg.io"]
+    resources: ["haclusters/status"]
+    verbs: ["get", "patch", "update"]
+  - apiGroups: ["postgresql.cnpg.io"]
+    resources: ["clusters"]
+    verbs: ["get", "list", "patch", "update", "watch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: {{ include "cnpg-ha.fullname" . }}-manager-rolebinding
+  labels:
+    {{- include "cnpg-ha.labels" . | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: {{ include "cnpg-ha.fullname" . }}-manager-role
+subjects:
+  - kind: ServiceAccount
+    name: {{ include "cnpg-ha.serviceAccountName" . }}
+    namespace: {{ .Release.Namespace }}
+{{- end }}

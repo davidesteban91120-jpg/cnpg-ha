@@ -28,4 +28,15 @@ WORKDIR /
 COPY --from=builder /workspace/manager .
 USER 65532:65532
 
+# OCI image annotations. The `source`/`revision`/`version` labels are
+# overwritten at build time by docker/metadata-action so that the published
+# image always points back to the exact commit that produced it. The
+# baseline values below keep `docker inspect` informative for local builds.
+LABEL org.opencontainers.image.title="cnpg-ha"
+LABEL org.opencontainers.image.description="Multi-site failover operator for CloudNativePG"
+LABEL org.opencontainers.image.source="https://github.com/davidesteban/cnpg-ha"
+LABEL org.opencontainers.image.licenses="Apache-2.0"
+LABEL org.opencontainers.image.vendor="davidesteban"
+LABEL org.opencontainers.image.base.name="gcr.io/distroless/static:nonroot"
+
 ENTRYPOINT ["/manager"]

@@ -1,0 +1,29 @@
+# hadolint — Dockerfile linter config.
+# Docs: https://github.com/hadolint/hadolint#configure
+failure-threshold: warning
+
+ignored:
+  # DL3008: pinning apt versions — we use a distroless runtime and the
+  # build stage only runs `go build` with no apt usage. Re-enable if the
+  # Dockerfile ever installs OS packages.
+  - DL3008
+  # DL3007: don't pin :latest — we already pin specific Go and distroless tags
+  # via base images, but the underlying digest may not be pinned. The Renovate
+  # `dockerfile` manager will introduce digest pinning over time.
+  - DL3007
+
+trusted-registries:
+  - docker.io
+  - ghcr.io
+  - gcr.io
+  - registry.k8s.io
+
+# Treat these labels as required for any image we publish.
+label-schema:
+  org.opencontainers.image.source: url
+  org.opencontainers.image.revision: hash
+  org.opencontainers.image.version: text
+  org.opencontainers.image.title: text
+  org.opencontainers.image.description: text
+  org.opencontainers.image.licenses: spdx
+strict-labels: false

@@ -1,0 +1,35 @@
+cnpg-ha {{ .Chart.AppVersion }} installed in namespace `{{ .Release.Namespace }}` as release `{{ .Release.Name }}`.
+
+1. Check that the controller is up:
+
+   kubectl -n {{ .Release.Namespace }} rollout status deploy/{{ include "cnpg-ha.fullname" . }}-controller-manager
+
+2. Tail logs (current level: {{ .Values.log.level }}):
+
+   kubectl -n {{ .Release.Namespace }} logs -l app.kubernetes.io/instance={{ .Release.Name }} -f
+
+3. List managed HAClusters across namespaces:
+
+   kubectl get hacluster -A
+
+4. Switch to debug logging without re-installing:
+
+   helm upgrade {{ .Release.Name }} {{ .Chart.Name }} -n {{ .Release.Namespace }} --reuse-values --set log.level=debug
+
+{{- if not .Values.crds.install }}
+
+WARNING: `crds.install=false` — make sure the HACluster CRD is installed by another means,
+         otherwise the controller will fail to start.
+{{- end }}
+
+{{- if and (gt (int .Values.replicaCount) 1) (not .Values.manager.leaderElect) }}
+
+WARNING: replicaCount={{ .Values.replicaCount }} but `manager.leaderElect=false`.
+         Multiple active controllers will fight over the same resources — enable leader election.
+{{- end }}
+
+{{- if and .Values.metrics.serviceMonitor.enabled (not .Values.metrics.service.enabled) }}
+
+WARNING: `metrics.serviceMonitor.enabled=true` but `metrics.service.enabled=false`.
+         The ServiceMonitor has no Service to target.
+{{- end }}

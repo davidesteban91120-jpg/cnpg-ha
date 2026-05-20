@@ -1,0 +1,129 @@
+# Code-level supply-chain scans.
+# - govulncheck   : Go vulnerability DB (sources + binaries)
+# - gosec         : Go SAST
+# - osv-scanner   : cross-ecosystem CVE scan (Go, GHA, Dockerfile)
+# - gitleaks      : secret scanning across full git history
+# - trivy fs      : filesystem scan (catches misconfig in YAML/Helm too)
+#
+# All findings upload SARIF to the GitHub Security tab so they show up in
+# the "Code scanning alerts" view and on the PR.
+name: code-scan
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  schedule:
+    # Re-scan every Monday at 06:00 UTC to catch CVEs published against
+    # code that has not changed since the last commit.
+    - cron: "0 6 * * 1"
+
+concurrency:
+  group: code-scan-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  govulncheck:
+    name: govulncheck
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Run govulncheck
+        uses: golang/govulncheck-action@v1
+        with:
+          go-version-file: go.mod
+          repo-checkout: false
+
+  gosec:
+    name: gosec
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run gosec
+        uses: securego/gosec@master
+        with:
+          args: "-no-fail -fmt sarif -out gosec.sarif ./..."
+      - name: Upload gosec SARIF
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: gosec.sarif
+          category: gosec
+
+  osv-scanner:
+    name: osv-scanner
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run osv-scanner
+        uses: google/osv-scanner-action/osv-scanner-action@v2.0.0
+        with:
+          scan-args: |-
+            --recursive
+            --format=sarif
+            --output=osv.sarif
+            ./
+        continue-on-error: true
+      - name: Upload osv-scanner SARIF
+        uses: github/codeql-action/upload-sarif@v3
+        if: always()
+        with:
+          sarif_file: osv.sarif
+          category: osv-scanner
+
+  gitleaks:
+    name: gitleaks
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # full history — gitleaks scans every commit.
+      - name: Run gitleaks
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # For private repos, set GITLEAKS_LICENSE in repo secrets.
+
+  trivy-fs:
+    name: trivy fs
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Scan filesystem + IaC + Helm
+        uses: aquasecurity/trivy-action@0.24.0
+        with:
+          scan-type: fs
+          scan-ref: .
+          format: sarif
+          output: trivy-fs.sarif
+          severity: HIGH,CRITICAL
+          ignore-unfixed: true
+          trivyignores: .trivyignore
+          exit-code: "1"
+      - name: Upload trivy fs SARIF
+        if: always()
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: trivy-fs.sarif
+          category: trivy-fs

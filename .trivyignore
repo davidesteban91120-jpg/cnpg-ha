@@ -1,0 +1,12 @@
+# Trivy suppression file — list CVEs that are acknowledged false positives or
+# accepted risks. Each entry MUST have:
+#   - the CVE id
+#   - a one-line justification
+#   - an expiration date (ISO-8601) — re-evaluate before that date
+#
+# Format: `<CVE-id> exp:YYYY-MM-DD <justification>`
+#
+# Example (kept commented; remove the leading `#` to activate):
+# CVE-2024-12345 exp:2026-12-31 Vulnerable code path is not reachable: the
+# affected function is only invoked by the webhook subsystem which is disabled
+# by default (see charts/cnpg-ha/values.yaml#webhook).

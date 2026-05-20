@@ -1,0 +1,30 @@
+apiVersion: v2
+name: cnpg-ha
+description: Multi-site failover operator for CloudNativePG (CNPG) clusters.
+type: application
+version: 0.1.0
+appVersion: "0.1.0"
+kubeVersion: ">=1.28.0-0"
+home: https://github.com/davidesteban/cnpg-ha
+sources:
+  - https://github.com/davidesteban/cnpg-ha
+maintainers:
+  - name: David Esteban
+    email: david.esteban91120@gmail.com
+keywords:
+  - postgresql
+  - cnpg
+  - cloudnativepg
+  - high-availability
+  - failover
+  - multi-cluster
+  - operator
+annotations:
+  artifacthub.io/operator: "true"
+  artifacthub.io/operatorCapabilities: Basic Install
+  artifacthub.io/crds: |
+    - kind: HACluster
+      version: v1alpha1
+      name: haclusters.ha.ha.cnpg.io
+      displayName: HACluster
+      description: Group of geographically distributed CNPG Clusters managed for cross-site failover.

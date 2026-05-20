@@ -1,0 +1,25 @@
+# Code owners — auto-requested as reviewers on PRs that touch the matching paths.
+# Order matters: the LAST matching entry wins.
+#
+# See https://docs.github.com/en/repositories/managing-your-repositories-settings-and-customization/customizing-your-repository/about-code-owners
+
+# Default owner for anything not explicitly listed.
+*                                       @davidesteban
+
+# API + reconcile logic — high blast radius, require explicit review.
+/api/                                   @davidesteban
+/internal/controller/                   @davidesteban
+
+# Supply chain & CI surfaces — block silent edits.
+/.github/                               @davidesteban
+/.pre-commit-config.yaml                @davidesteban
+/.golangci.yml                          @davidesteban
+/.gitleaks.toml                         @davidesteban
+/.hadolint.yaml                         @davidesteban
+/renovate.json                          @davidesteban
+/Dockerfile                             @davidesteban
+/SECURITY.md                            @davidesteban
+/docs/SUPPLY_CHAIN.md                   @davidesteban
+
+# Helm chart — change of values shape may break user installs.
+/charts/                                @davidesteban

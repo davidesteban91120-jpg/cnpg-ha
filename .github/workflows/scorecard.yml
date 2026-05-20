@@ -1,0 +1,42 @@
+# OSSF Scorecard — runs the open-source security health checks and uploads
+# the SARIF report to the GitHub Security tab. Public Scorecard view:
+# https://securityscorecards.dev/viewer/?uri=github.com/davidesteban/cnpg-ha
+name: scorecard
+
+on:
+  branch_protection_rule:
+  push:
+    branches: [main]
+  schedule:
+    # Weekly Monday 04:00 UTC.
+    - cron: "0 4 * * 1"
+  workflow_dispatch:
+
+permissions: read-all
+
+jobs:
+  analysis:
+    name: scorecard analysis
+    runs-on: ubuntu-latest
+    permissions:
+      security-events: write
+      id-token: write       # publish results to scorecard public dashboard
+      contents: read
+      actions: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Run analysis
+        uses: ossf/scorecard-action@v2.4.0
+        with:
+          results_file: scorecard.sarif
+          results_format: sarif
+          publish_results: true
+
+      - name: Upload SARIF
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: scorecard.sarif
+          category: scorecard

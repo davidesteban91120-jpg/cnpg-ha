@@ -1,0 +1,90 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "extends": [
+    "config:best-practices",
+    ":semanticCommits",
+    ":dependencyDashboard",
+    "helpers:pinGitHubActionDigests",
+    "group:allNonMajor",
+    "schedule:earlyMondays"
+  ],
+  "timezone": "Europe/Paris",
+  "labels": ["dependencies"],
+  "prHourlyLimit": 4,
+  "prConcurrentLimit": 10,
+  "rebaseWhen": "behind-base-branch",
+  "vulnerabilityAlerts": {
+    "enabled": true,
+    "labels": ["security", "vulnerability"],
+    "schedule": ["at any time"]
+  },
+  "osvVulnerabilityAlerts": true,
+  "postUpdateOptions": [
+    "gomodTidy",
+    "gomodUpdateImportPaths"
+  ],
+  "ignorePaths": [
+    "vendor/**",
+    "**/testdata/**"
+  ],
+  "packageRules": [
+    {
+      "matchManagers": ["gomod"],
+      "addLabels": ["go"],
+      "commitMessagePrefix": "deps(go):"
+    },
+    {
+      "groupName": "kubernetes",
+      "matchManagers": ["gomod"],
+      "matchPackageNames": ["k8s.io/{/,}**", "sigs.k8s.io/{/,}**"]
+    },
+    {
+      "groupName": "cloudnative-pg",
+      "matchManagers": ["gomod"],
+      "matchPackageNames": ["github.com/cloudnative-pg/{/,}**"]
+    },
+    {
+      "groupName": "observability",
+      "matchManagers": ["gomod"],
+      "matchPackageNames": [
+        "github.com/prometheus/{/,}**",
+        "go.opentelemetry.io/{/,}**"
+      ]
+    },
+    {
+      "matchManagers": ["github-actions"],
+      "addLabels": ["github-actions"],
+      "commitMessagePrefix": "deps(ci):",
+      "pinDigests": true
+    },
+    {
+      "matchManagers": ["dockerfile"],
+      "addLabels": ["docker"],
+      "commitMessagePrefix": "deps(docker):"
+    },
+    {
+      "matchManagers": ["helmv3", "helm-values"],
+      "addLabels": ["helm"],
+      "commitMessagePrefix": "deps(chart):"
+    },
+    {
+      "description": "Auto-merge patch + digest pin updates after CI passes — low risk, high volume.",
+      "matchUpdateTypes": ["patch", "pin", "digest"],
+      "automerge": true,
+      "automergeType": "pr",
+      "platformAutomerge": true
+    },
+    {
+      "description": "Never bump Go runtime via Dockerfile — handled by the Go toolchain directive in go.mod.",
+      "matchManagers": ["dockerfile"],
+      "matchPackageNames": ["golang", "docker.io/library/golang"],
+      "enabled": false
+    },
+    {
+      "description": "Pre-1.0 modules: group minor + patch together (avoids PR storms).",
+      "matchCurrentVersion": "/^v?0\\./",
+      "matchUpdateTypes": ["minor", "patch"],
+      "groupName": "pre-1.0 minor+patch"
+    }
+  ]
+}

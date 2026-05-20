@@ -29,5 +29,14 @@ go.work
 # Kubeconfig might contain secrets
 *.kubeconfig
 
-# Project AI-assistant context (local only, not tracked)
+# Persistent e2e shared CA (contains a private key — never commit)
+hack/e2e/clustermesh/.ca/
+
+# Local-only context files (not tracked)
 AGENTS.md
+
+# Helm packaging artefacts
+dist/
+*.tgz
+charts/*/charts/
+charts/*/Chart.lock

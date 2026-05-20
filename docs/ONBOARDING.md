@@ -17,6 +17,7 @@ Si tu hésites entre lire ce document ou les autres :
 2. [EXPLAIN.md](./EXPLAIN.md) → comprendre **ce qu'on construit** et **pourquoi**.
 3. [ARCHITECTURE.md](./ARCHITECTURE.md) → comprendre **comment** c'est construit.
 4. [CONVENTION.md](./CONVENTION.md) → règles à suivre quand tu écris du code.
+5. [SUPPLY_CHAIN.md](./SUPPLY_CHAIN.md) → pipeline supply chain (SBOM, signature, SLSA, vérifications).
 
 ---
 
@@ -224,6 +225,7 @@ Pour les termes métier (replica cluster, WAL, RTO/RPO) → [EXPLAIN.md](./EXPLA
 | Pourquoi tel choix d'archi ? | [ARCHITECTURE.md](./ARCHITECTURE.md) §8 ou maintainer |
 | Comment écrire du Go idiomatique ? | [CONVENTION.md](./CONVENTION.md) + [Effective Go](https://go.dev/doc/effective_go) |
 | CNPG fait-il déjà X ? | [docs CNPG](https://cloudnative-pg.io/documentation/current/) avant tout |
+| Comment vérifier la supply chain d'une release ? | [SUPPLY_CHAIN.md](./SUPPLY_CHAIN.md) |
 
 ---
 

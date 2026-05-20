@@ -190,6 +190,127 @@ deploy: manifests kustomize ## Deploy controller to the K8s cluster specified in
 undeploy: kustomize ## Undeploy controller from the K8s cluster specified in ~/.kube/config. Call with ignore-not-found=true to ignore resource not found errors during deletion.
 	"$(KUSTOMIZE)" build config/default | "$(KUBECTL)" delete --ignore-not-found=$(ignore-not-found) -f -
 
+##@ Helm
+
+HELM ?= helm
+CHART_DIR ?= charts/cnpg-ha
+HELM_RELEASE ?= cnpg-ha
+HELM_NAMESPACE ?= cnpg-ha-system
+
+.PHONY: helm-lint
+helm-lint: ## Lint the Helm chart (strict mode).
+	$(HELM) lint $(CHART_DIR) --strict
+
+.PHONY: helm-template
+helm-template: ## Render the chart with default values and pipe through kubectl --dry-run.
+	$(HELM) template $(HELM_RELEASE) $(CHART_DIR) --namespace $(HELM_NAMESPACE)
+
+.PHONY: helm-template-dryrun
+helm-template-dryrun: ## Render + server-side validate the chart against the current cluster.
+	$(HELM) template $(HELM_RELEASE) $(CHART_DIR) --namespace $(HELM_NAMESPACE) | $(KUBECTL) apply --dry-run=client -f -
+
+.PHONY: helm-package
+helm-package: ## Package the chart into dist/.
+	mkdir -p dist
+	$(HELM) package $(CHART_DIR) -d dist/
+
+.PHONY: helm-install
+helm-install: ## Install/upgrade the chart locally (override IMG to point to your build).
+	$(HELM) upgrade --install $(HELM_RELEASE) $(CHART_DIR) \
+		--namespace $(HELM_NAMESPACE) --create-namespace \
+		--set image.repository=$(word 1,$(subst :, ,$(IMG))) \
+		--set image.tag=$(word 2,$(subst :, ,$(IMG)))
+
+.PHONY: helm-uninstall
+helm-uninstall: ## Uninstall the chart (keeps CRDs by default).
+	$(HELM) uninstall $(HELM_RELEASE) --namespace $(HELM_NAMESPACE)
+
+##@ Supply chain
+# Local equivalents of the CI scans. Re-run before opening a PR to fail fast.
+
+GOVULNCHECK ?= $(LOCALBIN)/govulncheck
+GOSEC ?= $(LOCALBIN)/gosec
+SYFT ?= $(LOCALBIN)/syft
+TRIVY ?= trivy
+COSIGN ?= cosign
+GITLEAKS ?= gitleaks
+HADOLINT ?= hadolint
+PRE_COMMIT ?= pre-commit
+
+GOVULNCHECK_VERSION ?= v1.1.4
+GOSEC_VERSION ?= v2.21.4
+SYFT_VERSION ?= v1.18.1
+
+.PHONY: govulncheck
+govulncheck: $(GOVULNCHECK) ## Run Go vulnerability scanner.
+	$(GOVULNCHECK) ./...
+$(GOVULNCHECK): $(LOCALBIN)
+	$(call go-install-tool,$(GOVULNCHECK),golang.org/x/vuln/cmd/govulncheck,$(GOVULNCHECK_VERSION))
+
+.PHONY: gosec
+gosec: $(GOSEC) ## Run gosec SAST.
+	$(GOSEC) -exclude-dir=vendor -exclude-dir=bin ./...
+$(GOSEC): $(LOCALBIN)
+	$(call go-install-tool,$(GOSEC),github.com/securego/gosec/v2/cmd/gosec,$(GOSEC_VERSION))
+
+.PHONY: gitleaks
+gitleaks: ## Scan git history for secrets (requires gitleaks in PATH).
+	@command -v $(GITLEAKS) >/dev/null || { echo "install gitleaks: brew install gitleaks"; exit 1; }
+	$(GITLEAKS) detect --source . --config .gitleaks.toml --redact --verbose
+
+.PHONY: hadolint
+hadolint: ## Lint the Dockerfile (requires hadolint in PATH).
+	@command -v $(HADOLINT) >/dev/null || { echo "install hadolint: brew install hadolint"; exit 1; }
+	$(HADOLINT) --config .hadolint.yaml Dockerfile
+
+.PHONY: trivy-fs
+trivy-fs: ## Trivy filesystem + IaC scan (requires trivy in PATH).
+	@command -v $(TRIVY) >/dev/null || { echo "install trivy: brew install trivy"; exit 1; }
+	$(TRIVY) fs --severity HIGH,CRITICAL --ignore-unfixed --exit-code 1 --skip-dirs vendor,bin .
+
+.PHONY: trivy-image
+trivy-image: ## Trivy image scan (set IMG=<ref>).
+	@command -v $(TRIVY) >/dev/null || { echo "install trivy: brew install trivy"; exit 1; }
+	$(TRIVY) image --severity HIGH,CRITICAL --ignore-unfixed --exit-code 1 $(IMG)
+
+.PHONY: sbom
+sbom: $(SYFT) ## Generate SPDX-JSON SBOM for IMG into sbom.spdx.json.
+	$(SYFT) "$(IMG)" -o spdx-json=sbom.spdx.json
+	@echo "SBOM written to sbom.spdx.json"
+$(SYFT): $(LOCALBIN)
+	$(call go-install-tool,$(SYFT),github.com/anchore/syft/cmd/syft,$(SYFT_VERSION))
+
+.PHONY: cosign-verify
+cosign-verify: ## Verify the keyless signature of IMG against the GitHub repo identity.
+	@command -v $(COSIGN) >/dev/null || { echo "install cosign: brew install cosign"; exit 1; }
+	$(COSIGN) verify "$(IMG)" \
+		--certificate-identity-regexp "^https://github.com/davidesteban/cnpg-ha/" \
+		--certificate-oidc-issuer https://token.actions.githubusercontent.com
+
+.PHONY: cosign-verify-attestations
+cosign-verify-attestations: ## Verify SBOM + SLSA provenance attestations for IMG.
+	@command -v $(COSIGN) >/dev/null || { echo "install cosign: brew install cosign"; exit 1; }
+	$(COSIGN) verify-attestation "$(IMG)" --type spdxjson \
+		--certificate-identity-regexp "^https://github.com/davidesteban/cnpg-ha/" \
+		--certificate-oidc-issuer https://token.actions.githubusercontent.com
+	$(COSIGN) verify-attestation "$(IMG)" --type slsaprovenance \
+		--certificate-identity-regexp "^https://github.com/slsa-framework/slsa-github-generator" \
+		--certificate-oidc-issuer https://token.actions.githubusercontent.com
+
+.PHONY: precommit-install
+precommit-install: ## Install pre-commit hooks into .git/hooks/.
+	@command -v $(PRE_COMMIT) >/dev/null || { echo "install pre-commit: pipx install pre-commit"; exit 1; }
+	$(PRE_COMMIT) install --install-hooks
+	$(PRE_COMMIT) install --hook-type commit-msg
+
+.PHONY: precommit-run
+precommit-run: ## Run all pre-commit hooks on the whole repo.
+	@command -v $(PRE_COMMIT) >/dev/null || { echo "install pre-commit: pipx install pre-commit"; exit 1; }
+	$(PRE_COMMIT) run --all-files
+
+.PHONY: supply-chain-local
+supply-chain-local: govulncheck gosec hadolint trivy-fs gitleaks helm-lint ## Run every local supply-chain check (CI parity, no image required).
+
 ##@ Dependencies
 
 ## Location to install dependencies to

@@ -54,6 +54,44 @@ conversion webhook but **must** be listed under `### Breaking` (CONVENTION §2.4
   intra-cluster HA) is treated as one logical site; killing the local
   primary pod triggers a CNPG intra-cluster failover and cnpg-ha does NOT
   perform a cross-site failover (intra-cluster HA stays delegated to CNPG).
+- Cilium Cluster Mesh e2e (`hack/e2e/clustermesh/`): 3 KinD clusters +
+  Cilium Cluster Mesh + 3 CNPG Clusters (1Gi) streaming cross-cluster over
+  the mesh (`30-cnpg-mesh.sh`), and an operator-driven automatic site
+  failover scenario (`40-failover.sh`) asserting promotion
+  (MostAdvancedLSN), DR fence/flip skip, Cilium affinity flip, surviving
+  replica re-point + timeline follow, and no data loss. Validated
+  end-to-end on real KinD.
+- Per-site addressable global Services (`pg-<site>-rw`, Cilium
+  `global`+`affinity`): each site's primary is individually reachable
+  across the mesh, which is what makes the operator's surviving-replica
+  Reconfigure an actual CNPG spec change (a single shared global name made
+  it a no-op, leaving the survivor pinned to the dead primary's timeline).
+- **Helm chart** (`charts/cnpg-ha/`): feature-equivalent to the Kustomize
+  overlay under `config/`. Exposes `log.level`, resources, anti-affinity
+  preset (`none|soft|hard`) + raw override, replicas + leader election,
+  metrics/HTTPS, ServiceMonitor, NetworkPolicy, webhook, CRD install + keep.
+  `values.schema.json` validates enums. `make helm-lint`, `helm-package`,
+  `helm-template`, `helm-install` targets added.
+- **Supply chain pipeline**: image build/push to `ghcr.io` with multi-arch
+  buildx, Cosign keyless signing (Sigstore Fulcio + Rekor), Syft SBOM
+  (SPDX-JSON) attached as Cosign attestation, SLSA L3 provenance via
+  `slsa-framework/slsa-github-generator`. Helm chart published as OCI
+  artifact and Cosign-signed.
+- **Code-level scans** (`.github/workflows/code-scan.yml`): `govulncheck`,
+  `gosec`, `osv-scanner`, `gitleaks`, `trivy fs` — all uploading SARIF to
+  the GitHub Security tab. OSSF Scorecard weekly snapshot.
+- **Repo hygiene**: `LICENSE` (Apache-2.0), `SECURITY.md`, `CODEOWNERS`,
+  `renovate.json` (best-practices preset, GHA SHA pinning, gomod/dockerfile
+  /helm/github-actions managers), pre-commit hooks
+  (`.pre-commit-config.yaml`) with conventional-commits enforcement,
+  `.gitleaks.toml`, `.hadolint.yaml`, `.trivyignore`.
+- **Verification doc** (`docs/SUPPLY_CHAIN.md`): threat model, end-to-end
+  diagram, Cosign/SLSA verify commands, Kyverno + policy-controller sample
+  ClusterPolicies for admission-time enforcement.
+- **Makefile** supply-chain targets: `govulncheck`, `gosec`, `gitleaks`,
+  `hadolint`, `trivy-fs`, `trivy-image`, `sbom`, `cosign-verify`,
+  `cosign-verify-attestations`, `precommit-install`, `precommit-run`,
+  `supply-chain-local` (full local CI parity).
 
 ### Fixed
 
@@ -72,6 +110,11 @@ conversion webhook but **must** be listed under `### Breaking` (CONVENTION §2.4
   promoted primary is transiently unhealthy during CNPG's promotion
   restart. Regression test `TestAutomaticFailover_StabilizationCooldown`;
   validated end-to-end on a 3-site shared-CA KinD setup.
+- RBAC: the operator may now create/patch Events in the modern
+  `events.k8s.io` API group, not only the core `""` group. After the
+  events API migration the generated Role only covered `""`, so every
+  failover Event was rejected (`events.events.k8s.io is forbidden`) —
+  non-fatal but it dropped the failover audit trail.
 - `internal/remoteclient` cache is now keyed by the kubeconfig Secret's
   `resourceVersion`: a rotated kubeconfig is picked up on the next
   reconcile instead of only on a manager restart. Graceful degradation
@@ -106,6 +149,13 @@ conversion webhook but **must** be listed under `### Breaking` (CONVENTION §2.4
   replication LSN nor a lag. `MostAdvancedLSN` uses `status.timelineID` as a
   coarse advancement proxy. A precise implementation needs a dedicated
   Postgres probe (architecture decision pending).
-- AutoReplica rejoin is unit-tested but not yet validated end-to-end on a
-  real multi-site cluster (requires shared cross-site replication trust
-  material — see ARCHITECTURE §9.6).
+- The *returning old primary* AutoReplica rejoin path is unit-tested but
+  not yet validated end-to-end on the mesh: `40-failover.sh` keeps the
+  lost site down (DR). Promotion + *surviving* replica re-attachment IS
+  validated end-to-end; bringing site-a back as an AutoReplica of the new
+  primary is the remaining gap.
+- Operator-driven failover requires PER-SITE ReplicationEndpoints. With a
+  single shared global endpoint the surviving-replica Reconfigure is a
+  no-op (host unchanged → CNPG never restarts the walreceiver) and the
+  survivor stays on the dead primary's timeline. The e2e uses distinct
+  `pg-<site>-rw` global Services; document this in user-facing guidance.

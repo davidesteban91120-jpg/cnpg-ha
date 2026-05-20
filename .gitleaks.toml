@@ -1,0 +1,24 @@
+# gitleaks config — extends the default ruleset and whitelists known false
+# positives specific to this repo (test fixtures, sample kubeconfigs in docs).
+# See https://github.com/gitleaks/gitleaks/blob/master/config/gitleaks.toml
+# for the bundled rules.
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Project-wide allowlist"
+paths = [
+  '''vendor/''',
+  '''.*\.golden$''',
+  '''docs/.*\.md$''',                # example kubeconfigs / CRs in docs are illustrative
+  '''hack/e2e/clustermesh/.ca/''',   # e2e CA fixtures (gitignored, defense-in-depth)
+  '''internal/.*_test\.go$''',       # test fixtures with placeholder tokens
+  '''charts/cnpg-ha/README\.md$''',
+]
+regexes = [
+  # Kubernetes/CNPG documentation placeholders.
+  '''(?i)REPLACE[-_]?ME''',
+  '''(?i)CHANGE[-_]?ME''',
+  '''(?i)example[-_]?(token|key|password|secret)''',
+  '''sha256:[0-9a-f]{64}''',         # image digests in docs/manifests are not secrets
+]

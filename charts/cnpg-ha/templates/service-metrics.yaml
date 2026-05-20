@@ -1,0 +1,22 @@
+{{- if and .Values.metrics.enabled .Values.metrics.service.enabled -}}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "cnpg-ha.fullname" . }}-metrics
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "cnpg-ha.labels" . | nindent 4 }}
+  {{- with .Values.metrics.service.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  type: {{ .Values.metrics.service.type }}
+  ports:
+    - name: {{ if .Values.metrics.secure }}https{{ else }}http{{ end }}
+      port: {{ .Values.metrics.service.port }}
+      protocol: TCP
+      targetPort: {{ if .Values.metrics.secure }}https{{ else }}http{{ end }}
+  selector:
+    {{- include "cnpg-ha.selectorLabels" . | nindent 4 }}
+{{- end }}
