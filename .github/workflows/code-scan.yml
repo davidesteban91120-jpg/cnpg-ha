@@ -83,16 +83,19 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Run osv-scanner
-        # --call-analysis=none disables the embedded govulncheck pass.
+        # --no-call-analysis=go disables the embedded govulncheck pass.
         # osv-scanner v2.0.0 ships Go 1.23 in its container; with our go.mod
         # toolchain directive at 1.25+ the call-analysis pass crashes
-        # (GOTOOLCHAIN=local). We run govulncheck in a dedicated job above
-        # with the right Go version, so this duplication is unnecessary.
+        # ('go.mod requires go >= 1.25.7 (running go 1.23.7; GOTOOLCHAIN=local)').
+        # We run govulncheck in a dedicated job above with the right Go
+        # version, so the duplication is unnecessary.
+        # Note: --call-analysis=none does NOT work — 'none' is parsed as a
+        # language name and Go remains enabled by default.
         uses: google/osv-scanner-action/osv-scanner-action@v2.0.0
         with:
           scan-args: |-
             --recursive
-            --call-analysis=none
+            --no-call-analysis=go
             --format=sarif
             --output=osv.sarif
             ./
