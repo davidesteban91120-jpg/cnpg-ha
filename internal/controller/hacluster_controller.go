@@ -837,27 +837,54 @@ func findObservation(name string, primary siteObservation, replicas []siteObserv
 // local client (it lives in the operator's own cluster, or via the local
 // kubeconfig under `make run`).
 func (r *HAClusterReconciler) observePrimary(ctx context.Context, ha *hav1alpha1.HACluster) siteObservation {
+	log := logf.FromContext(ctx)
 	ref := types.NamespacedName{
 		Namespace: ha.Spec.Primary.ClusterRef.Namespace,
 		Name:      ha.Spec.Primary.ClusterRef.Name,
 	}
-	return siteObsFromHealth(ha.Spec.Primary.Name, health.Probe(ctx, r.Client, ref))
+	obs := siteObsFromHealth(ha.Spec.Primary.Name, health.Probe(ctx, r.Client, ref))
+	log.V(1).Info("primary site observed",
+		"site", obs.name,
+		"reachable", obs.reachable,
+		"primary", obs.primary,
+		"ready", obs.ready,
+		"phase", obs.phase,
+		"reason", obs.reason,
+	)
+	return obs
 }
 
 // observeReplica probes a replica site's CNPG Cluster via its remote client
 // (built from the kubeconfig Secret). A kubeconfig load failure yields an
 // unreachable observation rather than an error, so one bad site cannot fail
-// the whole reconcile.
+// the whole reconcile — but the cause is logged at Error level so operators
+// see it without having to kubectl-describe the HACluster status.
 func (r *HAClusterReconciler) observeReplica(ctx context.Context, ha *hav1alpha1.HACluster, rep hav1alpha1.ReplicaSite) siteObservation {
+	log := logf.FromContext(ctx)
 	cli, err := r.RemoteClients.GetOrCreate(ctx, r.Client, ha.Namespace, rep.KubeconfigSecretRef)
 	if err != nil {
+		log.Error(err, "kubeconfig load failed, treating replica site as unreachable",
+			"site", rep.Name,
+			"namespace", ha.Namespace,
+			"secret", rep.KubeconfigSecretRef.Name,
+			"key", rep.KubeconfigSecretRef.Key,
+		)
 		return siteObservation{name: rep.Name, reason: fmt.Sprintf("kubeconfig load failed: %v", err)}
 	}
 	ref := types.NamespacedName{
 		Namespace: rep.ClusterRef.Namespace,
 		Name:      rep.ClusterRef.Name,
 	}
-	return siteObsFromHealth(rep.Name, health.Probe(ctx, cli, ref))
+	obs := siteObsFromHealth(rep.Name, health.Probe(ctx, cli, ref))
+	log.V(1).Info("replica site observed",
+		"site", obs.name,
+		"reachable", obs.reachable,
+		"primary", obs.primary,
+		"ready", obs.ready,
+		"phase", obs.phase,
+		"reason", obs.reason,
+	)
+	return obs
 }
 
 // decideCurrentPrimary chooses the single site currently acting as the HA
