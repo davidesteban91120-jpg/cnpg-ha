@@ -1,72 +1,72 @@
 # CONVENTION.md — cnpg-ha
 
-> Règles de code Go et conventions projet. **Toute PR doit s'y conformer.**
-> Si une règle te paraît absurde dans un cas précis, **ouvre une discussion** plutôt que de la contourner silencieusement.
+> Go code rules and project conventions. **Every PR must comply.**
+> If a rule feels absurd in a specific case, **open a discussion** instead of silently working around it.
 
 ---
 
-## Partie 1 — Conventions Go
+## Part 1 — Go conventions
 
-### 1.1 Gestion d'erreur
+### 1.1 Error handling
 
-**Règle** : toute fonction qui peut échouer retourne `error` en **dernier** retour. Pas d'`ok bool`, pas d'`int code`.
+**Rule**: any function that can fail returns `error` as its **last** return value. No `ok bool`, no `int code`.
 
 ```go
-//  Bon
+// Good
 func ProbeSite(ctx context.Context, site string) (SiteHealth, error)
 
-//  Mauvais
+// Bad
 func ProbeSite(ctx context.Context, site string) (SiteHealth, bool)
 ```
 
-**Wrapping** : toujours `fmt.Errorf("contexte: %w", err)` quand on relaie une erreur. `%w` préserve la chaîne et permet `errors.Is` / `errors.As` plus haut.
+**Wrapping**: always `fmt.Errorf("context: %w", err)` when forwarding an error. `%w` preserves the chain and allows `errors.Is` / `errors.As` further up the stack.
 
 ```go
-//  Bon
+// Good
 if err := c.Get(ctx, key, &cluster); err != nil {
     return fmt.Errorf("get cnpg cluster %s/%s: %w", key.Namespace, key.Name, err)
 }
 
-//  Mauvais (perd la chaîne d'erreurs)
+// Bad (loses the error chain)
 return errors.New(err.Error())
 ```
 
-**Sentinels** : pour les erreurs qu'on doit pouvoir distinguer en amont, déclarer une variable `ErrXxx` exportée :
+**Sentinels**: for errors callers must be able to distinguish, declare an exported `ErrXxx` variable:
 
 ```go
 var ErrPrimaryUnreachable = errors.New("primary site unreachable")
-// ailleurs : errors.Is(err, ErrPrimaryUnreachable)
+// elsewhere: errors.Is(err, ErrPrimaryUnreachable)
 ```
 
-**Jamais** :
-- `_ = doSomething()` sans commentaire qui justifie l'ignore.
-- `panic` pour un cas prévisible (réservé aux invariants violés, donc aux bugs).
+**Never**:
+- `_ = doSomething()` without a comment justifying the ignore.
+- `panic` for a foreseeable case (reserved for violated invariants, i.e. bugs).
 
 ### 1.2 Context
 
-**Règle** : tout appel d'I/O (K8s API, HTTP, DB) prend un `context.Context` en **premier** paramètre. Toujours le propager, jamais `context.TODO()` en prod.
+**Rule**: every I/O call (K8s API, HTTP, DB) takes a `context.Context` as its **first** parameter. Always propagate it; never `context.TODO()` in production code.
 
 ```go
-//  Bon
+// Good
 func (r *HAClusterReconciler) probePrimary(ctx context.Context, ha *hav1alpha1.HACluster) error
 
-//  Mauvais
+// Bad
 func (r *HAClusterReconciler) probePrimary(ha *hav1alpha1.HACluster) error {
-    ctx := context.Background() // crée un ctx orphelin, ignore les timeouts du parent
+    ctx := context.Background() // creates an orphan ctx, ignores parent timeouts
     ...
 }
 ```
 
-**Timeouts** : tout I/O potentiellement long doit être borné. Préférer `context.WithTimeout` à un `time.After` maison.
+**Timeouts**: every potentially long I/O must be bounded. Prefer `context.WithTimeout` to a hand-rolled `time.After`.
 
 ```go
 ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
 defer cancel()
 ```
 
-### 1.3 Logs
+### 1.3 Logging
 
-**Règle** : utiliser le `logr.Logger` injecté par controller-runtime via `log.FromContext(ctx)`. Pas de `fmt.Println`, pas de `log.Printf` de la stdlib.
+**Rule**: use the `logr.Logger` injected by controller-runtime through `log.FromContext(ctx)`. No `fmt.Println`, no `log.Printf` from the stdlib.
 
 ```go
 log := logf.FromContext(ctx)
@@ -75,18 +75,18 @@ log.Error(err, "failed to patch cnpg cluster", "site", site)
 log.V(1).Info("probe details", "lsn", lsn, "lagSeconds", lag)
 ```
 
-**Niveaux** :
-- `Info` : événements normaux à observer en prod (transitions, décisions).
-- `Error` : avec une erreur attachée. **L'erreur N'EST PAS le message** — le message décrit *quoi*, l'erreur dit *pourquoi*.
-- `V(1)` : debug. Désactivé en prod via `-zap-log-level`.
+**Levels**:
+- `Info`: normal events worth observing in production (transitions, decisions).
+- `Error`: with an attached error. **The error is NOT the message** — the message says *what*, the error says *why*.
+- `V(1)`: debug. Disabled in production via `-zap-log-level`.
 
-**Sécurité** : ne **jamais** logger un kubeconfig, un secret, un mot de passe, même en V(2). Si tu hésites, redacte (`"redacted"` ou un hash court).
+**Security**: **never** log a kubeconfig, a secret, a password — even at V(2). If unsure, redact (`"redacted"` or a short hash).
 
 ### 1.4 Tests
 
-**Table-driven** par défaut pour toute logique métier. Exemple réel tiré de
-`internal/controller/helpers_test.go` (mapping d'une observation interne vers
-le type API `SiteStatus`) :
+**Table-driven by default** for any business logic. Real example pulled from
+`internal/controller/helpers_test.go` (mapping an internal observation to
+the API type `SiteStatus`):
 
 ```go
 func TestToSiteStatus(t *testing.T) {
@@ -97,7 +97,7 @@ func TestToSiteStatus(t *testing.T) {
         want hav1alpha1.SiteStatus
     }{
         {
-            name: "unreachable → role Unknown, message préservé",
+            name: "unreachable -> role Unknown, message preserved",
             obs:  siteObservation{name: "site-a", reachable: false, reason: "kubeconfig load failed"},
             want: hav1alpha1.SiteStatus{
                 Name: "site-a", Role: hav1alpha1.SiteRoleUnknown,
@@ -106,7 +106,7 @@ func TestToSiteStatus(t *testing.T) {
             },
         },
         {
-            name: "reachable + primary + ready → role Primary",
+            name: "reachable + primary + ready -> role Primary",
             obs: siteObservation{
                 name: "site-a", reachable: true, primary: true, ready: true,
                 phase: "Cluster in healthy state",
@@ -131,15 +131,16 @@ func TestToSiteStatus(t *testing.T) {
 }
 ```
 
-**Règle d'isolation** : avant d'utiliser un fake client K8s, regarder si la
-logique peut être extraite en fonction pure. Exemple : `parseClusterStatus`
-prend un `*unstructured.Unstructured` et renvoie `(primary, ready, phase,
-reason)` sans aucune I/O — testable trivialement, atteint 100 % de coverage
-avec 5 cas table-driven.
+**Isolation rule**: before reaching for a fake K8s client, ask whether the
+logic can be extracted as a pure function. Example: `parseClusterStatus`
+takes a `*unstructured.Unstructured` and returns `(primary, ready, phase,
+reason)` with no I/O — trivially testable, reaches 100% coverage with five
+table-driven cases.
 
-**Code qui dial l'API K8s** : utiliser `sigs.k8s.io/controller-runtime/pkg/client/fake`
-pour exercer les chemins success/error sans envtest. Exemple tiré de
-`TestFillObservationSuccessPath` :
+**Code that dials the K8s API**: use
+`sigs.k8s.io/controller-runtime/pkg/client/fake` to exercise the
+success / error paths without envtest. Example taken from
+`TestFillObservationSuccessPath`:
 
 ```go
 scheme := runtime.NewScheme()
@@ -158,70 +159,71 @@ cli := fake.NewClientBuilder().WithScheme(scheme).WithObjects(cluster).Build()
 
 r := &HAClusterReconciler{}
 got := r.fillObservation(ctx, cli, "site-a", "pg-prod", siteObservation{name: "site-a"})
-// assertions sur got.reachable, got.primary, got.ready, ...
+// assertions on got.reachable, got.primary, got.ready, ...
 ```
 
-Le fake client suffit dès qu'on teste un Reconciler en isolation — plus
-rapide qu'envtest, et permet d'injecter facilement des cas "site KO".
+The fake client is enough as soon as we test a Reconciler in isolation —
+faster than envtest, and it lets us inject "site down" cases easily.
 
-**Assertions** : préférer `testify/require` pour les vérifications critiques
-(interrompt le test), `assert` pour les vérifications secondaires.
-Acceptable d'utiliser la stdlib `t.Errorf` / `t.Fatalf` pour les tests simples
-(choix par défaut sur ce repo — pas de testify dans `go.mod`).
+**Assertions**: prefer `testify/require` for critical checks (it aborts the
+test), `assert` for secondary ones. The stdlib `t.Errorf` / `t.Fatalf` is
+acceptable for simple tests (default in this repo — no testify in
+`go.mod`).
 
-**Tests d'intégration** : `envtest` (sans kubelet) — `make test` les lance déjà.
-Tests e2e KinD multi-cluster → `test/e2e/`, lancés en CI uniquement.
+**Integration tests**: `envtest` (no kubelet) — `make test` already runs
+them. End-to-end KinD multi-cluster tests live under `test/e2e/`, executed
+in CI only.
 
-**Couverture** : objectif **≥ 90 %** sur les packages contenant de la logique
-de décision (`internal/controller`, futur `internal/promotion`). À vérifier
-via `go tool cover -func=cover.out` après `make test`. Toute logique de
-décision (choix de replica, évaluation santé) doit avoir un test
-table-driven. **Pas de PR sans test pour ces zones**.
+**Coverage**: target **≥ 90%** on packages that hold decision logic
+(`internal/controller`, future `internal/promotion`). Check via
+`go tool cover -func=cover.out` after `make test`. Any decision logic
+(replica choice, health evaluation) must have a table-driven test.
+**No PR without a test for those areas.**
 
 ### 1.5 Documentation (godoc)
 
-**Règle** : tout symbole **exporté** (lettre majuscule) a un commentaire godoc. Première phrase = nom du symbole + verbe au présent.
+**Rule**: every **exported** symbol (leading capital) carries a godoc comment. The first sentence is `Symbol verb …` in the present tense.
 
 ```go
-//  Bon
-// Promote demote l'ancien primary et promeut le replica désigné.
-// Renvoie ErrFencingFailed si le fencing du primary n'a pas pu être posé.
+// Good
+// Promote demotes the old primary and promotes the designated replica.
+// Returns ErrFencingFailed when the primary cannot be fenced.
 func Promote(ctx context.Context, c client.Client, target string) error
 
-//  Mauvais (ne commence pas par le nom)
-// Cette fonction promeut un replica.
+// Bad (does not start with the symbol name)
+// This function promotes a replica.
 func Promote(...) error
 ```
 
-Les champs exportés des structs (CRD spec/status) ont aussi un godoc — il sert à générer l'OpenAPI.
+Exported struct fields (CRD spec/status) also need godoc — it is used to generate the OpenAPI schema.
 
-### 1.6 Concurrence
+### 1.6 Concurrency
 
-**Règle** : controller-runtime gère le parallélisme (un Reconcile par objet). Si tu lances une goroutine, justifie-le.
+**Rule**: controller-runtime handles parallelism (one Reconcile per object). If you spawn a goroutine, justify it.
 
-- Toute goroutine reçoit un `ctx` et s'arrête quand `ctx.Done()` se ferme.
-- Pas de `time.Sleep` dans une goroutine : utiliser `select { case <-ctx.Done(): return; case <-time.After(d): }`.
-- Communication : channels > mémoire partagée. Si vraiment shared state, `sync.RWMutex` documenté.
+- Every goroutine takes a `ctx` and stops when `ctx.Done()` closes.
+- No `time.Sleep` inside a goroutine: use `select { case <-ctx.Done(): return; case <-time.After(d): }`.
+- Communication: channels > shared memory. If you really need shared state, document the `sync.RWMutex`.
 
-### 1.7 Dépendances
+### 1.7 Dependencies
 
-**Règle** : avant d'ajouter une dépendance, **justifier dans la PR** pourquoi la stdlib + `k8s.io/*` + `controller-runtime` ne suffisent pas.
+**Rule**: before adding a dependency, **justify in the PR** why stdlib + `k8s.io/*` + `controller-runtime` is not enough.
 
-- Pas de `pkg/errors` (remplacé par `errors.Is`/`As` + `%w` depuis Go 1.13).
-- Pas de `logrus` ni `zerolog` (on utilise `logr` via controller-runtime).
-- Préférer `sigs.k8s.io/*` aux forks indépendants.
+- No `pkg/errors` (replaced by `errors.Is`/`As` + `%w` since Go 1.13).
+- No `logrus` or `zerolog` (we use `logr` through controller-runtime).
+- Prefer `sigs.k8s.io/*` over independent forks.
 
-### 1.8 Layout & visibilité
+### 1.8 Layout & visibility
 
-- Tout par défaut sous `internal/` → pas importable hors du module. Sortir un package vers `pkg/` **uniquement** si on veut explicitement qu'il soit consommé en API publique.
-- Pas de package nommé `utils` / `common` / `helpers` → fourre-tout, signe que le découpage est raté. Préférer un nom métier (`health`, `promotion`, `remoteclient`).
-- Un fichier `.go` ≈ une responsabilité. Pas de fichier de 2000 lignes.
+- Everything defaults to `internal/` → not importable outside the module. Promote a package to `pkg/` **only** when you deliberately want it consumed as public API.
+- No package named `utils` / `common` / `helpers` → catch-all, sign of bad slicing. Use a business name (`health`, `promotion`, `remoteclient`).
+- One `.go` file ≈ one responsibility. No 2000-line files.
 
-### 1.9 Style mécanique
+### 1.9 Mechanical style
 
-- `gofmt` / `goimports` obligatoires (pre-commit + CI).
-- `golangci-lint run` doit passer en CI. Désactiver un linter sur une ligne précise avec `//nolint:linter // raison` — jamais au niveau du fichier sans justification.
-- Imports groupés : stdlib, externes, internes au module, séparés par une ligne vide.
+- `gofmt` / `goimports` mandatory (pre-commit + CI).
+- `golangci-lint run` must pass in CI. Disable a linter on a precise line with `//nolint:linter // reason` — never at file level without justification.
+- Imports grouped: stdlib, external, in-module, separated by a blank line.
 
 ```go
 import (
@@ -237,23 +239,23 @@ import (
 
 ---
 
-## Partie 2 — Conventions projet
+## Part 2 — Project conventions
 
 ### 2.1 Branches
 
-| Préfixe | Usage |
+| Prefix | Use |
 |---|---|
-| `feat/<short-desc>` | Nouvelle fonctionnalité |
-| `fix/<short-desc>` | Correctif |
-| `refactor/<short-desc>` | Refactor sans changement de comportement |
-| `chore/<short-desc>` | CI, deps, build, doc |
-| `docs/<short-desc>` | Documentation seule |
+| `feat/<short-desc>` | New feature |
+| `fix/<short-desc>` | Bug fix |
+| `refactor/<short-desc>` | Refactor without behaviour change |
+| `chore/<short-desc>` | CI, deps, build, docs |
+| `docs/<short-desc>` | Documentation only |
 
-Branche cible par défaut : `main`. Pas de develop/staging — on garde simple.
+Default target branch: `main`. No develop/staging — keep it simple.
 
 ### 2.2 Commits — Conventional Commits
 
-Format : `<type>(<scope>): <résumé>`
+Format: `<type>(<scope>): <summary>`
 
 ```
 feat(controller): add promotion logic for MostAdvancedLSN policy
@@ -264,54 +266,54 @@ chore(deps): bump controller-runtime to v0.20.0
 test(promotion): add table-driven cases for Ordered policy
 ```
 
-Types acceptés : `feat`, `fix`, `refactor`, `docs`, `test`, `chore`, `perf`, `build`, `ci`.
+Accepted types: `feat`, `fix`, `refactor`, `docs`, `test`, `chore`, `perf`, `build`, `ci`.
 
-Le **scope** est le sous-package touché (`controller`, `remoteclient`, `health`, `promotion`, `metrics`, `api`).
+The **scope** is the sub-package touched (`controller`, `remoteclient`, `health`, `promotion`, `metrics`, `api`).
 
-**Corps** : optionnel, mais obligatoire pour expliquer un *pourquoi* non évident. Pas de paraphrase du diff.
+**Body**: optional, but required to explain a non-obvious *why*. Do not paraphrase the diff.
 
 ### 2.3 Pull Requests
 
-**Titre** : même format que le commit (un commit = une PR de préférence, sinon le titre résume).
+**Title**: same format as the commit (preferably one commit per PR; otherwise the title summarises).
 
-**Description** — template minimal :
+**Description** — minimal template:
 
 ```markdown
-## Quoi
-Une phrase.
+## What
+One sentence.
 
-## Pourquoi
-Une à trois phrases. Lier l'issue/ticket si pertinent.
+## Why
+One to three sentences. Link the issue/ticket when relevant.
 
-## Comment tester
-Étapes reproductibles. Si nouvelle logique : pointer le test ajouté.
+## How to test
+Reproducible steps. New logic → point at the added test.
 
-## Risques / points d'attention
-Régressions possibles, RBAC modifié, breaking change CRD ?
+## Risks / things to watch
+Possible regressions, RBAC change, CRD breaking change?
 ```
 
-**Taille** : < 400 lignes diff de préférence. Au-delà, découper en PRs en cascade.
+**Size**: < 400 diff lines preferred. Beyond that, split into stacked PRs.
 
-**Review** : 1 reviewer minimum. Tous les commentaires bloquants doivent être résolus ou explicitement levés avant merge.
+**Review**: at least one reviewer. Every blocking comment must be resolved or explicitly waived before merge.
 
-**Merge** : squash par défaut. Le titre de squash reprend le titre de la PR.
+**Merge**: squash by default. The squash title reuses the PR title.
 
-### 2.4 Versioning de la CRD
+### 2.4 CRD versioning
 
-- `v1alpha1` : API instable, breaking changes autorisés sans migration.
-- `v1beta1` : API stable en intention, breaking changes seulement avec déprécation explicite et conversion webhook.
-- `v1` : stable, breaking changes interdits hors major release.
+- `v1alpha1`: unstable API, breaking changes allowed without migration.
+- `v1beta1`: API stable in intent, breaking changes only with explicit deprecation and a conversion webhook.
+- `v1`: stable, breaking changes forbidden outside a major release.
 
-**Règle** : tant qu'on est en `v1alpha1`, on peut casser le schéma — mais **toujours documenter dans le CHANGELOG**. Une fois promu en `v1beta1`, plus de breaking sans webhook de conversion.
+**Rule**: while we are in `v1alpha1`, the schema may break — but **always document it in CHANGELOG**. Once promoted to `v1beta1`, no more breaking changes without a conversion webhook.
 
 ### 2.5 CHANGELOG
 
-Tenu à la main dans `CHANGELOG.md`, format [Keep a Changelog](https://keepachangelog.com/) :
+Hand-maintained in `CHANGELOG.md`, [Keep a Changelog](https://keepachangelog.com/) format:
 
 ```markdown
 ## [Unreleased]
 ### Added
-- Promotion policy `MostAdvancedLSN`
+- `MostAdvancedLSN` promotion policy
 
 ### Changed
 - `failover.healthCheckIntervalSeconds` default 5 → 10
@@ -323,32 +325,32 @@ Tenu à la main dans `CHANGELOG.md`, format [Keep a Changelog](https://keepachan
 - Field `spec.replicas[].kubeconfigSecret` renamed to `spec.replicas[].kubeconfigSecretRef`
 ```
 
-Mis à jour **dans la même PR** que le changement. Pas de PR "update changelog" séparée.
+Updated **in the same PR** as the change. No separate "update changelog" PR.
 
-### 2.6 RBAC et sécurité
+### 2.6 RBAC and security
 
-- Les markers `+kubebuilder:rbac:` sur les controllers génèrent le `ClusterRole`. **Pas de RBAC édité à la main** dans `config/rbac/` — toujours via les markers.
-- Tout nouveau besoin RBAC sur un cluster distant doit être listé dans `ARCHITECTURE.md` §4.2 et justifié.
-- **Jamais** committer un kubeconfig, un Secret, un certificat. `.gitignore` doit couvrir `*.kubeconfig`, `kubeconfig`, `*.key`, `*.pem`.
+- The `+kubebuilder:rbac:` markers on controllers generate the `ClusterRole`. **No RBAC edited by hand** in `config/rbac/` — always go through the markers.
+- Any new RBAC need on a remote cluster must be listed in `ARCHITECTURE.md §4.2` and justified.
+- **Never** commit a kubeconfig, a Secret, a certificate. `.gitignore` must cover `*.kubeconfig`, `kubeconfig`, `*.key`, `*.pem`.
 
 ### 2.7 Releases
 
-- Tags semver : `v0.1.0`, `v0.2.0`, etc. Tant qu'on est `0.x`, semver "best-effort".
-- Image Docker tagguée `ghcr.io/davidesteban/cnpg-ha:v0.1.0` + `:latest` sur main.
-- Release notes générées depuis le CHANGELOG.
+- SemVer tags: `v0.1.0`, `v0.2.0`, … While we are on `0.x`, SemVer is best-effort.
+- Docker image tagged `ghcr.io/davidesteban91120-jpg/cnpg-ha:v0.1.0` and `:latest` on main.
+- Release notes generated from the CHANGELOG.
 
 ---
 
-## Partie 3 — Checklist de PR
+## Part 3 — PR checklist
 
-À copier en commentaire de PR avant de demander review :
+Paste this into the PR description before asking for review:
 
 ```markdown
-- [ ] `make manifests generate build test lint` passe en local
-- [ ] Nouveau symbole exporté → godoc rédigé
-- [ ] Logique métier → test table-driven
-- [ ] Dépendance ajoutée → justification dans la description
-- [ ] CRD modifiée → CHANGELOG.md mis à jour
-- [ ] RBAC modifié → ARCHITECTURE.md §4 mis à jour
-- [ ] Aucun secret/kubeconfig/credential committé
+- [ ] `make manifests generate build test lint` passes locally
+- [ ] New exported symbol → godoc written
+- [ ] Business logic → table-driven test
+- [ ] New dependency → justification in the description
+- [ ] CRD changed → CHANGELOG.md updated
+- [ ] RBAC changed → ARCHITECTURE.md §4 updated
+- [ ] No secret/kubeconfig/credential committed
 ```

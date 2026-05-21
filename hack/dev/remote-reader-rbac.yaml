@@ -1,7 +1,7 @@
-# ServiceAccount + RBAC + token Secret pour générer un kubeconfig
-# "in-cluster" utilisable par l'opérateur quand il tourne comme Pod.
-# La SA n'a que les droits minimaux pour lire les CR CNPG Cluster
-# cluster-wide (cohérent avec CONVENTION.md / ARCHITECTURE.md §4.2).
+# ServiceAccount + RBAC + token Secret used to build an "in-cluster"
+# kubeconfig that the operator consumes when it runs as a Pod.
+# The SA carries only the minimum rights needed to read CNPG Cluster CRs
+# cluster-wide (consistent with CONVENTION.md / ARCHITECTURE.md §4.2).
 ---
 apiVersion: v1
 kind: ServiceAccount
@@ -31,9 +31,9 @@ roleRef:
   kind: ClusterRole
   name: hacluster-remote-reader
 ---
-# Secret de type SA-token pour obtenir un token long-lived (sinon K8s ≥ 1.24
-# génère uniquement des tokens via TokenRequest, time-bound et complexes
-# à embarquer dans un kubeconfig statique).
+# SA-token Secret used to obtain a long-lived token (otherwise K8s >= 1.24
+# only issues tokens through TokenRequest — time-bound and awkward to embed
+# inside a static kubeconfig).
 apiVersion: v1
 kind: Secret
 metadata:

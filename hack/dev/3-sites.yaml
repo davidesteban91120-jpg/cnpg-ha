@@ -1,6 +1,6 @@
-# Manifests de test : 3 namespaces (site-a, site-b, site-c) + 3 CNPG Clusters
-# indépendants. Pas de réplication CNPG entre eux (hors scope de ce test).
-# Le but est d'exercer la logique d'observation de notre opérateur HACluster.
+# Test manifests: 3 namespaces (site-a, site-b, site-c) + 3 independent
+# CNPG Clusters. No CNPG replication between them (out of scope for this
+# test). Goal: exercise the observation logic of the HACluster operator.
 ---
 apiVersion: v1
 kind: Namespace

@@ -8,12 +8,12 @@ You may obtain a copy of the License at
     http://www.apache.org/licenses/LICENSE-2.0
 */
 
-// Package remoteclient gère la création et la mise en cache de clients
-// Kubernetes pour les clusters distants référencés par un HACluster.
+// Package remoteclient builds and caches Kubernetes clients for the remote
+// clusters referenced by an HACluster.
 //
-// Chaque site "replica" déclare un Secret contenant un kubeconfig. Ce package
-// charge ce kubeconfig, construit un client.Client controller-runtime, et le
-// cache pour éviter de reconstruire la config à chaque Reconcile.
+// Each replica site declares a Secret holding a kubeconfig. This package
+// loads that kubeconfig, builds a controller-runtime client.Client, and
+// caches it so the config is not rebuilt on every Reconcile.
 package remoteclient
 
 import (
@@ -29,9 +29,9 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
-// ErrSecretKeyEmpty est renvoyée quand la clé pointée dans le Secret est
-// présente mais vide. Distinct de "Secret introuvable" pour faciliter
-// le diagnostic côté operateur.
+// ErrSecretKeyEmpty is returned when the key referenced inside the Secret
+// exists but is empty. Kept distinct from "Secret not found" to ease
+// operator-side diagnosis.
 var ErrSecretKeyEmpty = errors.New("kubeconfig secret key is empty")
 
 // cachedClient is a built remote client together with the resourceVersion
@@ -56,10 +56,10 @@ type Cache struct {
 	scheme  *runtime.Scheme
 }
 
-// NewCache construit un Cache vide. Le scheme doit déjà connaître les types
-// que le client distant manipulera (Secrets, CNPG Cluster, etc.). En pratique,
-// passer le scheme du manager local suffit puisque les CRD sont identiques
-// de chaque côté.
+// NewCache builds an empty Cache. The scheme must already know the types
+// that the remote client will manipulate (Secrets, CNPG Cluster, …). In
+// practice passing the local manager's scheme is enough since the CRDs
+// match on both sides.
 func NewCache(scheme *runtime.Scheme) *Cache {
 	return &Cache{
 		clients: make(map[string]cachedClient),
@@ -115,9 +115,9 @@ func (c *Cache) GetOrCreate(
 	return cli, nil
 }
 
-// Invalidate retire un client du cache. À appeler quand on détecte qu'un
-// kubeconfig est obsolète (ex. erreur d'auth persistante) en plus du
-// rafraîchissement automatique par resourceVersion.
+// Invalidate removes a client from the cache. Call it when a kubeconfig is
+// detected as stale (e.g. persistent auth error) in addition to the
+// automatic resourceVersion-driven refresh.
 func (c *Cache) Invalidate(namespace string, secretRef corev1.SecretKeySelector) {
 	c.mu.Lock()
 	delete(c.clients, cacheKey(namespace, secretRef))
@@ -145,7 +145,7 @@ func (c *Cache) loadKubeconfig(
 	var secret corev1.Secret
 	nn := types.NamespacedName{Namespace: namespace, Name: secretRef.Name}
 	if err := hubClient.Get(ctx, nn, &secret); err != nil {
-		// Sécurité : ne pas inclure le contenu du Secret dans le message.
+		// Security: never include the Secret content in the error message.
 		return nil, "", fmt.Errorf("get kubeconfig secret %s/%s: %w", namespace, secretRef.Name, err)
 	}
 

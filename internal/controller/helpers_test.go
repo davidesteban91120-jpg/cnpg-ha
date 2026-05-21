@@ -21,13 +21,13 @@ import (
 	hav1alpha1 "github.com/davidesteban/cnpg-ha/api/v1alpha1"
 )
 
-// fixedNow renvoie un metav1.Time stable pour des tests reproductibles.
+// fixedNow returns a stable metav1.Time for reproducible tests.
 func fixedNow() metav1.Time {
 	return metav1.NewTime(time.Date(2026, 5, 14, 12, 0, 0, 0, time.UTC))
 }
 
-// findCondition cherche une condition par type dans une slice de conditions.
-// Retourne nil si non trouvée.
+// findCondition looks up a condition by type in a slice of conditions.
+// Returns nil when not found.
 func findCondition(conditions []metav1.Condition, t string) *metav1.Condition {
 	for i := range conditions {
 		if conditions[i].Type == t {
@@ -254,7 +254,7 @@ func TestDetectSplitBrain(t *testing.T) {
 			want:     nil,
 		},
 		{
-			name:     "tout en panne → nil (rien à comparer)",
+			name:     "all sites down -> nil (nothing to compare)",
 			primary:  downPrimary,
 			replicas: []siteObservation{{name: "site-b", reachable: true, primary: false, ready: false}},
 			want:     nil,
@@ -337,7 +337,7 @@ func TestSetConditions(t *testing.T) {
 			wantSplitReason: "NoConflict",
 		},
 		{
-			name:             "split-brain explicite → SplitBrain=True avec liste des sites",
+			name:             "explicit split-brain -> SplitBrain=True with site list",
 			available:        false,
 			splitBrain:       []string{"site-a", "site-c"},
 			primary:          siteObservation{name: "site-a", reachable: true, primary: true, ready: true},

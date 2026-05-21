@@ -1,6 +1,6 @@
-# HACluster de test pointant sur le setup 3-sites.yaml.
-# Note : site-a est déclaré primary, site-b/site-c sont replicas avec
-# kubeconfig Secrets pointant tous sur le même KinD (simulation cross-cluster).
+# Test HACluster pointing at the 3-sites.yaml setup.
+# Note: site-a is declared primary, site-b/site-c are replicas whose
+# kubeconfig Secrets all point at the same KinD (cross-cluster simulation).
 apiVersion: ha.cnpg.io/v1alpha1
 kind: HACluster
 metadata:

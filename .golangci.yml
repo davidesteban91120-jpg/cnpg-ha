@@ -35,12 +35,6 @@ linters:
     modernize:
       disable:
         - omitzero
-    misspell:
-      ignore-rules:
-        # Faux positifs sur des mots français.
-        - marrage     # démarrage
-        - manipule    # on manipule
-        - persistante # persistant(e) au féminin
   exclusions:
     generated: lax
     rules:

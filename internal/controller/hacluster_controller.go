@@ -35,11 +35,11 @@ import (
 )
 
 const (
-	// requeuePeriod : période de re-Reconcile périodique pour observer
-	// la dérive (un site qui passe en panne entre deux events watch).
+	// requeuePeriod is the periodic re-Reconcile interval used to detect
+	// drift (a site going down between two watch events).
 	requeuePeriod = 30 * time.Second
 
-	// Types de Condition exposés sur HACluster.status.conditions.
+	// Condition types exposed on HACluster.status.conditions.
 	conditionAvailable          = "Available"
 	conditionDegraded           = "Degraded"
 	conditionFailoverInProgress = "FailoverInProgress"
@@ -178,11 +178,11 @@ func (r *HAClusterReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 		}
 	}
 
-	// 4. Décider du primary courant à partir des observations (post-promotion).
+	// 4. Decide the current primary from the post-promotion observations.
 	currentPrimary, available := decideCurrentPrimary(primaryObs, replicaObs)
 	splitBrain := detectSplitBrain(primaryObs, replicaObs)
 
-	// 5. Mettre à jour le status.
+	// 5. Update the status.
 	ha.Status.ObservedGeneration = ha.Generation
 	// Keep the last accepted primary when no healthy primary is observed.
 	// Availability is carried by conditions; the failover state machine still
@@ -910,9 +910,9 @@ func primaryReadyCandidates(primary siteObservation, replicas []siteObservation)
 	return names
 }
 
-// toSiteStatus convertit une siteObservation interne en SiteStatus exposable
-// dans l'API. now est passé pour qu'une même valeur de timestamp soit
-// utilisée pour tous les sites d'un même Reconcile (cohérence d'observation).
+// toSiteStatus converts an internal siteObservation into a SiteStatus that
+// the API can expose. now is passed in so a single timestamp value is shared
+// by every site observed in the same Reconcile (observation consistency).
 func toSiteStatus(obs siteObservation, now metav1.Time) hav1alpha1.SiteStatus {
 	role := hav1alpha1.SiteRoleUnknown
 	if obs.reachable {
@@ -933,8 +933,8 @@ func toSiteStatus(obs siteObservation, now metav1.Time) hav1alpha1.SiteStatus {
 	}
 }
 
-// buildSiteStatuses agrège l'observation du primary et des replicas en une
-// liste ordonnée : primary en premier, puis replicas dans l'ordre du spec.
+// buildSiteStatuses aggregates the primary and replica observations into a
+// single ordered list: primary first, then replicas in spec order.
 func buildSiteStatuses(primary siteObservation, replicas []siteObservation, now metav1.Time) []hav1alpha1.SiteStatus {
 	out := make([]hav1alpha1.SiteStatus, 0, 1+len(replicas))
 	out = append(out, toSiteStatus(primary, now))

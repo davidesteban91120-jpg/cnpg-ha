@@ -1,17 +1,17 @@
 # ARCHITECTURE.md — cnpg-ha
 
-> Architecture cible de l'opérateur. Ce document décrit **le quoi et le pourquoi**.
-> Pour les conventions de code, voir [CONVENTION.md](./CONVENTION.md).
-> Pour le contexte métier (CNPG, replica cluster, LSN, fencing), voir [EXPLAIN.md](./EXPLAIN.md).
+> Target architecture of the operator. This document covers **the what and the why**.
+> For code conventions, see [CONVENTION.md](./CONVENTION.md).
+> For domain context (CNPG, replica cluster, LSN, fencing), see [EXPLAIN.md](./EXPLAIN.md).
 
 ---
 
-## 1. Vue d'ensemble
+## 1. Big picture
 
 ```
                         ┌────────────────────────┐
-                        │   Cluster K8s "hub"    │
-                        │  (où tourne cnpg-ha)   │
+                        │   "hub" K8s cluster    │
+                        │  (where cnpg-ha runs)  │
                         │                        │
                         │  ┌──────────────────┐  │
                         │  │ cnpg-ha Manager  │  │
@@ -36,61 +36,61 @@
    │                 │  │  (replica spec) │  │  (replica spec) │
    └─────────────────┘  └─────────────────┘  └─────────────────┘
          ▲                    ▲                    ▲
-         └──── streaming / WAL archive (CNPG natif) ┘
+         └──── streaming / WAL archive (native CNPG) ┘
 ```
 
-Le **hub** héberge l'opérateur. Il peut être l'un des sites *ou* un cluster de contrôle dédié — c'est un choix de déploiement, pas une contrainte d'architecture. Conséquence : si le hub tombe, l'opérateur s'arrête mais les CNPG continuent de servir normalement (l'opérateur n'est pas dans le chemin de la donnée).
+The **hub** hosts the operator. It can be one of the sites *or* a dedicated control cluster — a deployment choice, not an architectural constraint. Consequence: if the hub goes down, the operator stops but the CNPG clusters keep serving (the operator is not on the data path).
 
 ---
 
-## 2. Composants
+## 2. Components
 
-### 2.1 Packages présents
+### 2.1 Current packages
 
-| Package | Rôle | Dépendances clés |
+| Package | Role | Key dependencies |
 |---|---|---|
-| `api/v1alpha1` | Types Go des CRD (`HACluster`) + markers de validation | `apimachinery` |
-| `cmd/main.go` | Entrée : manager controller-runtime, leader election, metrics | `controller-runtime` |
-| `internal/controller` | Reconciler `HACluster` — observe les sites, maintient `status.currentPrimarySite`, déclenche les failovers manuel/automatique et réconcilie la topologie | `api/v1alpha1`, `remoteclient`, `health`, `promotion`, `metrics` |
-| `internal/remoteclient` | Cache de clients K8s distants (kubeconfig → `client.Client`) | `client-go`, `controller-runtime/client` |
-| `internal/health` | Sondes de santé d'un site via le CR CNPG `Cluster` (unstructured, sans dépendance CNPG Go) | `controller-runtime/client` |
-| `internal/promotion` | Actions idempotentes de promotion/reconfiguration : fence, promote, flip Cilium, repoint replicas | `controller-runtime/client` |
-| `internal/metrics` | Collecteurs Prometheus spécifiques cnpg-ha, enregistrés dans le registry controller-runtime | `prometheus/client_golang` |
+| `api/v1alpha1` | Go types for the CRDs (`HACluster`) + validation markers | `apimachinery` |
+| `cmd/main.go` | Entry point: controller-runtime manager, leader election, metrics | `controller-runtime` |
+| `internal/controller` | `HACluster` Reconciler — observes the sites, maintains `status.currentPrimarySite`, triggers manual/automatic failover and reconciles the topology | `api/v1alpha1`, `remoteclient`, `health`, `promotion`, `metrics` |
+| `internal/remoteclient` | Cache of remote K8s clients (kubeconfig → `client.Client`) | `client-go`, `controller-runtime/client` |
+| `internal/health` | Per-site health probes through the CNPG `Cluster` CR (unstructured, no CNPG Go dependency) | `controller-runtime/client` |
+| `internal/promotion` | Idempotent promotion / reconfiguration actions: fence, promote, flip Cilium, repoint replicas | `controller-runtime/client` |
+| `internal/metrics` | cnpg-ha-specific Prometheus collectors, registered into the controller-runtime registry | `prometheus/client_golang` |
 
-**Règle de dépendance** : `controller` orchestre les sous-packages `internal/*`. Les sous-packages restent découplés entre eux autant que possible, et tout cycle d'import est interdit.
+**Dependency rule**: `controller` orchestrates the `internal/*` sub-packages. Sub-packages stay as decoupled from each other as possible, and any import cycle is forbidden.
 
 ---
 
-## 3. Boucle de réconciliation
+## 3. Reconciliation loop
 
-### 3.1 Boucle actuelle
+### 3.1 Current loop
 
-Implémentation dans `internal/controller/hacluster_controller.go`. La boucle observe tous les sites, maintient `status.sites[]` et les conditions, honore les promotions manuelles par annotation, déclenche le failover automatique quand le seuil est atteint, puis réconcilie les autres sites vers le primary courant.
+Implementation in `internal/controller/hacluster_controller.go`. The loop observes every site, maintains `status.sites[]` and the conditions, honours manual promotions via annotation, triggers automatic failover when the threshold is reached, then reconciles the other sites toward the current primary.
 
-**Sémantique importante** :
+**Important semantics**:
 
-- `spec.primary` décrit le site local / bootstrap déclaré au départ. Après une bascule, il ne doit plus être interprété comme "le primary actuel".
-- `status.currentPrimarySite` est le dernier primary accepté par l'opérateur. Il reste renseigné même si ce site devient temporairement unhealthy ; l'indisponibilité est portée par `Available=False`.
-- Avant de promouvoir un nouveau site, l'opérateur fence et bascule le **primary courant** (`status.currentPrimarySite`), pas forcément `spec.primary`. Cela permet les bascules en chaîne : `site-a → site-b → site-c`.
+- `spec.primary` describes the local / bootstrap site declared at install time. After a failover it must no longer be interpreted as "the current primary".
+- `status.currentPrimarySite` is the last primary accepted by the operator. It stays set even when that site is transiently unhealthy; unavailability is carried by `Available=False`.
+- Before promoting a new site, the operator fences and flips the **current primary** (`status.currentPrimarySite`), not necessarily `spec.primary`. This is what makes chained failovers (`site-a → site-b → site-c`) work.
 
 ```
 Reconcile(HACluster)
 ├─ 1. Get HACluster (NotFound → silent return)
 │
-├─ 2. Observer le site bootstrap/local (`spec.primary`)
+├─ 2. Observe the bootstrap/local site (`spec.primary`)
 │       └─ observePrimary → health.Probe(local client)
 │             └─ cli.Get(cnpg.Cluster) + parseCluster(unstructured)
 │                  → siteObservation{reachable, primary, ready, phase, reason, timelineID}
 │
-├─ 3. Observer chaque replica (client distant)
-│       └─ pour chaque rep ∈ Spec.Replicas :
+├─ 3. Observe every replica (remote client)
+│       └─ for each rep ∈ Spec.Replicas:
 │            ├─ RemoteClients.GetOrCreate(kubeconfigSecretRef) → client.Client
 │            └─ health.Probe(remote client) → siteObservation
 │
-├─ 4. Promotion éventuelle
-│       ├─ Manual : annotation ha.cnpg.io/promote=<site>, si mode=Manual
-│       └─ Automatic : si status.currentPrimarySite est unhealthy ≥ failureThreshold
-│            ├─ chooseTarget(...) selon promotionPolicy
+├─ 4. Possible promotion
+│       ├─ Manual: annotation ha.cnpg.io/promote=<site>, if mode=Manual
+│       └─ Automatic: if status.currentPrimarySite is unhealthy ≥ failureThreshold
+│            ├─ chooseTarget(...) following promotionPolicy
 │            ├─ runPromotion(oldPrimary=status.currentPrimarySite, target)
 │            │    ├─ Fence(oldPrimary)
 │            │    ├─ FlipCiliumService(oldPrimary, RoleRemote)
@@ -98,87 +98,87 @@ Reconcile(HACluster)
 │            │    └─ FlipCiliumService(target, RoleLocal)
 │            └─ LastFailoverTime = now()
 │
-├─ 5. Décider du primary observé (logique pure)
-│       └─ decideCurrentPrimary(primaryObs, replicaObs) :
-│            ├─ exactement 1 site CNPG-primary & ready → primary observé
-│            └─ sinon → aucun primary disponible ou split-brain
+├─ 5. Decide the observed primary (pure logic)
+│       └─ decideCurrentPrimary(primaryObs, replicaObs):
+│            ├─ exactly 1 site CNPG-primary & ready → observed primary
+│            └─ otherwise → no primary available or split-brain
 │
-├─ 6. Mettre à jour le status (Status().Update)
+├─ 6. Update the status (Status().Update)
 │       ├─ ObservedGeneration = ha.Generation
-│       ├─ CurrentPrimarySite = primary observé, sinon ancien status.currentPrimarySite
-│       ├─ Sites = buildSiteStatuses(primary, replicas, now)   # primary en tête, puis Spec ordering
-│       └─ Conditions :
-│            ├─ Available  = True si un primary unique est observé
-│            ├─ SplitBrain = True si plusieurs sites sont CNPG-primary+ready
-│            └─ Degraded   = True si ≥ 1 site unreachable ou unready
+│       ├─ CurrentPrimarySite = observed primary, else previous status.currentPrimarySite
+│       ├─ Sites = buildSiteStatuses(primary, replicas, now)   # primary first, then Spec ordering
+│       └─ Conditions:
+│            ├─ Available  = True if a unique primary is observed
+│            ├─ SplitBrain = True if several sites are CNPG-primary+ready
+│            └─ Degraded   = True if ≥ 1 site is unreachable or not ready
 │
-├─ 7. Réconcilier la topologie vers le primary courant
-│       ├─ replicas survivants → Reconfigure(..., currentPrimary.replicationEndpoint)
-│       └─ ancien primary revenu → fence (Manual) ou AutoReplica
+├─ 7. Reconcile the topology toward the current primary
+│       ├─ surviving replicas → Reconfigure(..., currentPrimary.replicationEndpoint)
+│       └─ returning old primary → fence (Manual) or AutoReplica
 │
-└─ 8. RequeueAfter = healthCheckIntervalSeconds en Automatic, sinon 30 s
+└─ 8. RequeueAfter = healthCheckIntervalSeconds in Automatic, else 30 s
 ```
 
-Fonctions clés :
-- `health.parseCluster(*unstructured)` — fonction **pure** (pas d'I/O), testable sans client K8s. Lit `spec.replica.enabled`, `status.phase`, `status.readyInstances`, `status.timelineID`.
-- `decideCurrentPrimary` — fonction pure, table-driven testable.
-- `currentPrimaryForPromotion` — choisit l'ancien primary à démoter pour une promotion manuelle : `status.currentPrimarySite` d'abord, observation ensuite, `spec.primary` seulement comme fallback initial.
-- `runPromotion(oldPrimaryName, target)` — résout le client/ref de l'ancien primary par nom de site, donc fonctionne après plusieurs bascules successives.
-- `toSiteStatus` / `buildSiteStatuses` — conversion observation interne → type API.
+Key functions:
+- `health.parseCluster(*unstructured)` — **pure** function (no I/O), testable without a K8s client. Reads `spec.replica.enabled`, `status.phase`, `status.readyInstances`, `status.timelineID`.
+- `decideCurrentPrimary` — pure function, table-driven testable.
+- `currentPrimaryForPromotion` — picks the old primary to demote on a manual promotion: `status.currentPrimarySite` first, observation second, `spec.primary` only as initial fallback.
+- `runPromotion(oldPrimaryName, target)` — resolves the old primary's client/ref by site name, so it works after several successive failovers.
+- `toSiteStatus` / `buildSiteStatuses` — internal observation → API type conversion.
 
-### 3.2 Boucle cible
+### 3.2 Target loop
 
-La boucle cible garde les mêmes invariants, avec deux améliorations restantes : une vraie sonde LSN/lag côté Postgres et des timeouts explicites sur tous les appels distants longs.
+The target loop keeps the same invariants, with two remaining improvements: a real LSN/lag probe on the Postgres side and explicit timeouts on every long remote call.
 
 ```
-Reconcile(HACluster) [cible]
-├─ 1. Charger les kubeconfigs distants (cache TTL)
+Reconcile(HACluster) [target]
+├─ 1. Load remote kubeconfigs (TTL cache)
 │       └─ remoteclient.GetOrCreate(site) → client.Client
 │
-├─ 2. État observé : pour chaque site
+├─ 2. Observed state: for each site
 │       ├─ health.Probe(ctx, site) → SiteHealth { Reachable, PrimaryReady, LSN, LagSeconds }
-│       └─ stocké en mémoire (jamais en status hors résumé)
+│       └─ kept in memory (never in status beyond a summary)
 │
-├─ 3. Décision
-│       ├─ Si current primary OK → mettre à jour status + conditions, requeue
-│       ├─ Si current primary KO depuis < threshold → incrémenter compteur, requeue court
-│       └─ Si current primary KO depuis ≥ threshold ET mode=Automatic → step 4
-│           (si mode=Manual : émettre Event + condition Degraded, attendre annotation)
+├─ 3. Decision
+│       ├─ If current primary OK → update status + conditions, requeue
+│       ├─ If current primary KO for < threshold → increment counter, short requeue
+│       └─ If current primary KO for ≥ threshold AND mode=Automatic → step 4
+│           (mode=Manual: emit Event + Degraded condition, wait for annotation)
 │
 ├─ 4. Promotion
-│       ├─ a. promotion.Choose(replicas, policy) → site cible
-│       ├─ b. promotion.Fence(oldPrimary)               # CNPG annotation fencedInstances
+│       ├─ a. promotion.Choose(replicas, policy) → target site
+│       ├─ b. promotion.Fence(oldPrimary)               # CNPG fencedInstances annotation
 │       ├─ c. promotion.Promote(target)                 # patch spec.replica.enabled=false
-│       ├─ d. promotion.Reconfigure(otherReplicas)      # repointe vers le nouveau primary
+│       ├─ d. promotion.Reconfigure(otherReplicas)      # re-point at the new primary
 │       └─ e. Status.CurrentPrimarySite = target.Name
 │              Status.LastFailoverTime = now()
 │              Event "FailoverCompleted"
 │
-└─ 5. Toujours : Status.ObservedGeneration = obj.Generation, conditions à jour
+└─ 5. Always: Status.ObservedGeneration = obj.Generation, conditions up to date
 ```
 
-### Invariants de la boucle
+### Loop invariants
 
-1. **Idempotente** : ré-invocable à tout moment, part toujours du state observé.
-2. **Pas de state en RAM** entre deux Reconcile sauf cache de clients/compteurs de défaillance. Si l'opérateur redémarre, les compteurs repartent à 0 — acceptable car le health re-converge.
-3. **Status mis à jour APRÈS l'action**, jamais avant. On ne ment pas au user via le status.
-4. **Pas de blocage long** dans Reconcile : tout I/O cappé par `context.WithTimeout`. Si une opération doit prendre > 30 s, la découper et `RequeueAfter`.
+1. **Idempotent**: re-invocable at any point, always starts from observed state.
+2. **No RAM state between Reconciles** other than the client cache and the failure counters. If the operator restarts, the counters reset to 0 — acceptable because health re-converges.
+3. **Status updated AFTER the action**, never before. We do not lie to the user via the status.
+4. **No long blocking** in Reconcile: every I/O capped by `context.WithTimeout`. If an operation must take > 30 s, split it and `RequeueAfter`.
 
 ---
 
 ## 4. RBAC
 
-### 4.1 Sur le cluster hub (où tourne l'opérateur)
+### 4.1 On the hub cluster (where the operator runs)
 
 ```yaml
-# ClusterRole minimal — généré par les markers +kubebuilder:rbac dans le controller
+# Minimal ClusterRole — generated by the +kubebuilder:rbac markers on the controller
 - apiGroups: ["ha.cnpg.io"]
   resources: ["haclusters", "haclusters/status", "haclusters/finalizers"]
   verbs: ["get", "list", "watch", "update", "patch"]
 
 - apiGroups: [""]
   resources: ["secrets"]
-  verbs: ["get", "list", "watch"]   # lecture des kubeconfigs
+  verbs: ["get", "list", "watch"]   # read the kubeconfigs
 
 - apiGroups: [""]
   resources: ["events"]
@@ -190,9 +190,9 @@ Reconcile(HACluster) [cible]
   verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
 ```
 
-### 4.2 Sur chaque cluster distant (via kubeconfig)
+### 4.2 On every remote cluster (via kubeconfig)
 
-Le user/service-account porté par le kubeconfig doit avoir **le moins de droits possible** :
+The user / service account carried by the kubeconfig must hold **as few rights as possible**:
 
 ```yaml
 - apiGroups: ["postgresql.cnpg.io"]
@@ -205,109 +205,109 @@ Le user/service-account porté par le kubeconfig doit avoir **le moins de droits
 
 - apiGroups: [""]
   resources: ["secrets"]
-  verbs: ["get"]                    # credentials de streaming
+  verbs: ["get"]                    # streaming credentials
 ```
 
-**Jamais** `cluster-admin`, **jamais** `*` sur les verbes. Si un cluster distant ne permet pas ce RBAC minimal, refuser le site plutôt qu'élargir.
+**Never** `cluster-admin`, **never** `*` on verbs. If a remote cluster cannot grant this minimal RBAC, refuse the site rather than broaden the scope.
 
 ---
 
-## 5. Stockage du state
+## 5. State storage
 
-| Donnée | Où | Pourquoi |
+| Datum | Where | Why |
 |---|---|---|
-| Spec déclaratif | `HACluster.spec` | Source de vérité user |
-| Site primary courant | `HACluster.status.currentPrimarySite` | Dernier primary accepté par l'opérateur ; source de vérité pour savoir quel site fence lors d'une promotion |
-| Observation par site | `HACluster.status.sites[]` (`name`, `role`, `reachable`, `ready`, `phase`, `message`, `lastObservedTime`) | Inspection fine sans parser un message de condition |
-| Conditions agrégées | `HACluster.status.conditions[]` (`Available`, `Degraded`, …) | Sémantique standard K8s, exploitable par outils tiers |
-| Historique des failovers | Events K8s + Prometheus | Pas dans status (limite de taille) |
-| Cache clients distants | RAM (process) | Reconstruisible à tout moment |
-| Compteur de défaillance | RAM (process) | Reconstruisible — la santé re-converge |
-| Lease leader election | `coordination.k8s.io/Lease` | Évite deux managers actifs simultanés |
+| Declarative spec | `HACluster.spec` | User source of truth |
+| Current primary site | `HACluster.status.currentPrimarySite` | Last primary accepted by the operator; source of truth for which site to fence on a promotion |
+| Per-site observation | `HACluster.status.sites[]` (`name`, `role`, `reachable`, `ready`, `phase`, `message`, `lastObservedTime`) | Fine-grained inspection without parsing a condition message |
+| Aggregated conditions | `HACluster.status.conditions[]` (`Available`, `Degraded`, …) | Standard K8s semantics, consumable by third-party tools |
+| Failover history | K8s Events + Prometheus | Not in status (size limit) |
+| Remote client cache | RAM (process) | Rebuildable at any time |
+| Failure counter | RAM (process) | Rebuildable — health re-converges |
+| Leader-election lease | `coordination.k8s.io/Lease` | Prevents two active managers at the same time |
 
-**Règle** : aucune donnée critique en RAM seule. Si l'info doit survivre à un crash, elle va dans `status` ou un Event. Le reste est éphémère.
+**Rule**: no critical data in RAM alone. If the information must survive a crash, it goes into `status` or an Event. Everything else is ephemeral.
 
 ---
 
-## 6. Observabilité
+## 6. Observability
 
-### 6.1 Métriques Prometheus (à exposer sur `:8080/metrics`)
+### 6.1 Prometheus metrics (exposed on `:8080/metrics`)
 
-| Nom | Type | Labels | Sens |
+| Name | Type | Labels | Meaning |
 |---|---|---|---|
-| `cnpg_ha_current_primary_site` | Gauge | `hacluster`, `namespace`, `site` | 1 si le site est primary, 0 sinon |
-| `cnpg_ha_site_reachable` | Gauge | `hacluster`, `namespace`, `site` | 1 si le cluster distant répond |
-| `cnpg_ha_replica_lag_seconds` | Gauge | `hacluster`, `namespace`, `site` | Lag de réplication observé |
-| `cnpg_ha_failover_total` | Counter | `hacluster`, `namespace`, `reason` | Nombre de bascules effectuées |
-| `cnpg_ha_failover_duration_seconds` | Histogram | `hacluster`, `namespace` | Durée de la promotion |
-| `cnpg_ha_reconcile_errors_total` | Counter | `controller` | Erreurs côté operator lui-même |
+| `cnpg_ha_current_primary_site` | Gauge | `hacluster`, `namespace`, `site` | 1 if the site is primary, 0 otherwise |
+| `cnpg_ha_site_reachable` | Gauge | `hacluster`, `namespace`, `site` | 1 if the remote cluster responds |
+| `cnpg_ha_replica_lag_seconds` | Gauge | `hacluster`, `namespace`, `site` | Observed replication lag |
+| `cnpg_ha_failover_total` | Counter | `hacluster`, `namespace`, `reason` | Number of failovers performed |
+| `cnpg_ha_failover_duration_seconds` | Histogram | `hacluster`, `namespace` | Promotion duration |
+| `cnpg_ha_reconcile_errors_total` | Counter | `controller` | Errors on the operator side itself |
 
-Les compteurs `controller-runtime` standard (`controller_runtime_reconcile_total`, etc.) sont déjà exposés gratuitement — ne pas les dupliquer.
+Standard controller-runtime counters (`controller_runtime_reconcile_total`, …) are already exposed for free — do not duplicate them.
 
-### 6.2 Logs structurés (logr/JSON)
+### 6.2 Structured logs (logr/JSON)
 
-- `Info` : décisions et transitions de state. Ex. `"primary unreachable, incrementing failure counter" site=site-a count=2 threshold=3`.
-- `Error` : avec erreur attachée. Ex. `log.Error(err, "failed to patch replica", "site", siteName)`.
-- `V(1)` : détails de boucle (chaque Reconcile, chaque probe). Désactivé en prod.
+- `Info`: decisions and state transitions. E.g. `"primary unreachable, incrementing failure counter" site=site-a count=2 threshold=3`.
+- `Error`: with an attached error. E.g. `log.Error(err, "failed to patch replica", "site", siteName)`.
+- `V(1)`: loop details (every Reconcile, every probe). Disabled in production.
 
-### 6.3 Events K8s
+### 6.3 K8s Events
 
-Un Event par transition observable : `PrimaryUnreachable`, `FailoverStarted`, `FailoverCompleted`, `FailoverFailed`, `ManualPromotionRequested`. Permet `kubectl describe hacluster prod-db` parlant.
+One Event per observable transition: `PrimaryUnreachable`, `FailoverStarted`, `FailoverCompleted`, `FailoverFailed`, `ManualPromotionRequested`. Makes `kubectl describe hacluster prod-db` informative.
 
 ---
 
-## 7. Points sensibles SRE
+## 7. SRE-sensitive points
 
 ### 7.1 Split-brain
 
-**Symptôme** : deux primaries acceptant des écritures en même temps → divergence irrécupérable.
+**Symptom**: two primaries accepting writes at the same time → unrecoverable divergence.
 
-**Mitigation** :
-- Seuil de défaillance ≥ 3 sondes consécutives.
-- Sondes indépendantes : API K8s distante **et** statut CNPG (deux sources de vérité).
-- **Fencing obligatoire** avant promotion : annotation `cnpg.io/fencedInstances` sur l'ancien primary. Si fencing échoue, on N'ÉCRIT PAS la promotion.
-- Mode `Manual` par défaut tant que le fencing n'est pas validé en charge.
+**Mitigation**:
+- Failure threshold ≥ 3 consecutive probes.
+- Independent probes: remote K8s API **and** CNPG status (two sources of truth).
+- **Fencing required** before promotion: `cnpg.io/fencedInstances` annotation on the old primary. If fencing fails, we DO NOT proceed with the promotion.
+- `Manual` mode as default until fencing has been validated under load.
 
-### 7.2 Promotion sur replica en retard
+### 7.2 Promotion of a lagging replica
 
-**Symptôme** : on promeut un replica qui a 20 minutes de retard → perte de données.
+**Symptom**: we promote a replica that is 20 minutes behind → data loss.
 
-**Mitigation** :
+**Mitigation**:
 
-- `PromotionPolicy: MostAdvancedLSN` par défaut.
-- Seuil de lag maximum acceptable (à ajouter en spec : `failover.maxLagSeconds`).
-- Si tous les replicas sont au-delà du seuil → refuser le failover automatique, basculer en condition `Degraded`.
+- `PromotionPolicy: MostAdvancedLSN` by default.
+- Maximum acceptable lag threshold (to be added in the spec: `failover.maxLagSeconds`).
+- If every replica is past the threshold → refuse automatic failover, raise the `Degraded` condition.
 
 ### 7.3 Network blip
 
-**Symptôme** : 30 s de latence sur le hub → on croit que le primary est mort.
+**Symptom**: 30 s of latency on the hub → we believe the primary is dead.
 
-**Mitigation** :
+**Mitigation**:
 
-- Sondes depuis le hub *et* depuis un replica voisin (cross-check).
-- `failureThreshold * healthCheckIntervalSeconds` doit dépasser la durée max d'un incident réseau attendu (souvent 30-60 s).
+- Probes from the hub *and* from a neighbouring replica (cross-check).
+- `failureThreshold * healthCheckIntervalSeconds` must exceed the maximum expected duration of a network incident (often 30-60 s).
 
-### 7.4 Crash de l'opérateur pendant un failover
+### 7.4 Operator crash mid-failover
 
-**Symptôme** : promotion à moitié faite → état incohérent.
+**Symptom**: half-finished promotion → inconsistent state.
 
-**Mitigation** :
+**Mitigation**:
 
-- Étapes idempotentes : Fence, Promote, Reconfigure peuvent être ré-exécutées sans dégât.
-- Condition `FailoverInProgress=True` posée au début, retirée à la fin → un nouveau Reconcile sait reprendre.
-- Finalizer sur `HACluster` pour éviter qu'un delete pendant un failover laisse l'état corrompu.
+- Idempotent steps: Fence, Promote, Reconfigure can be re-executed without damage.
+- `FailoverInProgress=True` condition set at the start, removed at the end → a new Reconcile knows how to resume.
+- Finalizer on `HACluster` so that a delete during a failover does not leave the state corrupted.
 
 ---
 
-## 8. Choix d'architecture rejetés (et pourquoi)
+## 8. Architectural choices we rejected (and why)
 
-| Option | Rejetée car |
+| Option | Rejected because |
 |---|---|
-| Liqo / Karmada pour la découverte cross-cluster | Dépendance lourde, surface d'attaque accrue, plus complexe à débugger. Kubeconfig en Secret = simple et auditable. |
-| Stockage du state dans etcd dédié | Re-introduit un SPOF. K8s API + status suffisent. |
-| Décision de failover dans une CRD séparée | Sur-ingénierie. `HACluster.spec.failover` est suffisant tant qu'on a un seul mode. |
-| Promotion via webhook applicatif | Couplage à l'app. La promotion est une opération d'infra, doit rester dans l'opérateur. |
-| Sonde HTTP côté primary | Faux positifs (LB, ingress en dérive). Source de vérité = API K8s + CNPG status. |
+| Liqo / Karmada for cross-cluster discovery | Heavy dependency, larger attack surface, harder to debug. Kubeconfig in Secret = simple and auditable. |
+| State storage in a dedicated etcd | Re-introduces a single point of failure. K8s API + status are enough. |
+| Failover decision in a separate CRD | Over-engineering. `HACluster.spec.failover` is enough as long as there is a single mode. |
+| Promotion via an application webhook | Couples to the app. Promotion is an infra operation; it stays in the operator. |
+| HTTP probe on the primary side | False positives (LB, ingress drift). Source of truth = K8s API + CNPG status. |
 
 ---
 
@@ -315,7 +315,7 @@ Un Event par transition observable : `PrimaryUnreachable`, `FailoverStarted`, `F
 
 In multi-cloud topologies, failover is not just about patching the CNPG `Cluster` CR: write traffic must be **atomically redirected** from the old primary to the new one, across clusters and clouds. cnpg-ha relies on **Cilium Cluster Mesh** for this.
 
-> Decision recorded 2026-05-14. Alternatives evaluated (Istio multi-primary, Linkerd multicluster, Submariner) — see [§8](#8-choix-darchitecture-rejetés-et-pourquoi).
+> Decision recorded 2026-05-14. Alternatives evaluated (Istio multi-primary, Linkerd multicluster, Submariner) — see [§8](#8-architectural-choices-we-rejected-and-why).
 > Rationale: Postgres is long-lived TCP → eBPF L4 data plane is the best fit; no sidecar overhead; native mTLS identity; the operator drives Cilium primitives directly (no MCS-API abstraction layer).
 
 ### 9.1 Network substrate (out of operator scope)
@@ -404,37 +404,37 @@ prerequisite is met — surfaced as a non-ready replica in `status.sites[]`
 
 ---
 
-## 10. Roadmap d'implémentation
+## 10. Implementation roadmap
 
-### 10.1 Réalisé
+### 10.1 Done
 
-1. ✅ Scaffold + CRD `HACluster` v1alpha1.
-2. ✅ `internal/remoteclient` : cache de clients distants, redaction des secrets dans les logs.
-3. ✅ Reconcile d'observation : observation par site (`status.sites[]`), conditions `Available` / `Degraded`.
-4. ✅ `internal/promotion` : `Fence` + `Promote` + `FlipCiliumService`, failover manuel via annotation `ha.cnpg.io/promote: <site>` (mode `Manual`), conditions `FailoverInProgress`, events `Failover*` / `PromoteRejected`.
-5. ✅ Intégration Cilium Cluster Mesh dans la promotion (flip `service.cilium.io/global` + `affinity`, voir [§9](#9-service-mesh-integration--cilium-cluster-mesh)).
-6. ✅ Détection split-brain : condition `SplitBrain` quand plusieurs sites sont CNPG-primary+ready.
-7. ✅ Failover DR : la séquence ne s'interrompt plus si l'ancien primary a totalement disparu (`NotFound` toléré sur Fence / flip Cilium de l'ancien site).
-8. ✅ Reconfiguration auto de la topologie après failover : champs CRD `replicationEndpoint` (par site) + `failover.rejoinPolicy` (`Manual` | `AutoReplica`), `internal/promotion.Reconfigure`. Les replicas survivants suivent le nouveau primary ; un ancien primary qui revient est fencé (`Manual`) ou reconstruit en replica (`AutoReplica`).
-9. ✅ Prérequis CA inter-sites documenté ([§9.6](#96-cross-site-ca-prerequisite-streaming-replication-trust)).
-10. ✅ Mode `Automatic` : compteur de défaillances en RAM (mutex), seuil `failureThreshold`, déclenchement sans annotation, requeue à la cadence `healthCheckIntervalSeconds`, garde split-brain. Validé bout-en-bout sur KinD.
-11. ✅ Correctif sécurité rejoin : `reconcileReplicaTopology` reclasse chaque site via une **relecture autoritaire** du CR CNPG (et non le buffer d'observation muté pour le status) — un ancien primary démoté n'est plus reconfiguré en silence en bypassant `rejoinPolicy=Manual`. Garde de régression `TestAutomaticFailover_OldPrimaryFencedNotReconfigured`.
-12. ✅ Métriques Prometheus : `internal/metrics` (`cnpg_ha_current_primary_site`, `_site_reachable`, `_site_ready`, `_split_brain`, `cnpg_ha_failover_total{mode}`), enregistrées dans le registry controller-runtime. `replica_lag_seconds` non exposée (cf. §10.2 — CNPG n'expose pas le lag).
-13. ✅ `internal/health` extrait : `Probe` + `SiteHealth` (pur, testable), `parseCluster` ; le controller n'a plus de logique d'observation inline. Expose `timelineID` comme proxy d'avancement.
-14. ✅ `promotionPolicy` appliquée dans `chooseTarget` : `Ordered` (ordre du spec) et `MostAdvancedLSN` (timeline la plus haute, tie-break ordre du spec — proxy timeline, pas un vrai LSN).
-15. ✅ `CHANGELOG.md` (format Keep a Changelog) : section `[Unreleased]` couvrant les ajouts, fixes, changements de schéma CRD (`replicationEndpoint`, `rejoinPolicy`) et limitations connues.
-16. ✅ Cache `remoteclient` rafraîchi à la rotation : indexé par `resourceVersion` du Secret kubeconfig (un kubeconfig tourné est repris au prochain reconcile, plus au redémarrage). Dégradation gracieuse si le Secret est illisible mais un client est en cache.
-17. ✅ Tests d'intégration **envtest** (vrai API server, lancés par `make test`) : CRD CNPG minimale en fixture (`test/crd/`), specs Ginkgo *observation* (status + conditions) et *failover manuel bout-en-bout* (remoteclient via kubeconfig dérivé du `rest.Config` envtest → Promote/Fence/flip Cilium/strip annotation/status réels). La matrice exhaustive (split-brain, DR, topology, auto) reste couverte par les suites fake-client (rapides, déterministes).
-18. ✅ Anti-flapping : fenêtre de stabilisation post-failover (`max(30s, 3×healthCheckInterval)`, basée sur `Status.LastFailoverTime` persistée). Empêche la cascade `A→B→C` causée par le redémarrage de promotion CNPG du nouveau primary observé transitoirement unhealthy. Garde `TestAutomaticFailover_StabilizationCooldown`.
-19. ✅ Scénario réel validé sur KinD 3-sites **CA partagée** (`spec.certificates.{server,client}CASecret`) : crash primary → bascule auto **unique** → stabilisation (pas de cascade) → retour de l'ancien primary → re-fence `rejoinPolicy=Manual`, sans split-brain durable. Streaming cross-site réel confirmé (prérequis §9.6 levé via une CA EC partagée distribuée).
-20. ✅ Migration API events controller-runtime : `events.EventRecorder` (`Eventf`) via `mgr.GetEventRecorder`, plus de `record.EventRecorder` déprécié ni de `//nolint:staticcheck`. Tests sur `events.FakeRecorder` (même format de chaîne → assertions inchangées).
-21. ✅ e2e scriptés reproductibles (`hack/e2e/`, cibles `make e2e-shared-ca-setup` / `e2e-auto-failover` / `e2e-shared-ca` / `e2e-shared-ca-teardown`) : setup CA partagée EC P-256 + 3 sites streaming, puis scénario crash→bascule unique→retour avec assertions strictes (non-zéro si cascade/split-brain/regression). Validé bout-en-bout.
-22. ✅ Frontière HA intra-cluster vs bascule de site confirmée sur KinD : site-a en `instances: 3` (1 primary + 2 standbys locaux) coexiste avec la réplication cross-site (4 standbys côté site-a). cnpg-ha voit le site comme **une unité logique** (agnostique au nombre d'instances). Kill du pod primary local → CNPG promeut un standby intra-site ; cnpg-ha **ne déclenche AUCUNE bascule cross-site** (`FailoverStarted=0`, `currentPrimary` reste site-a) — le `failureThreshold` absorbe le blip. Conforme au scope du projet (HA intra-cluster déléguée à CNPG).
-23. ✅ Source de vérité du primary courant : `status.currentPrimarySite` reste le dernier primary accepté même pendant une panne temporaire ; `runPromotion` fence/flips ce site courant plutôt que `spec.primary`. Garde `TestAutomaticFailover_UsesStatusCurrentPrimaryAsOldPrimary` pour les bascules en chaîne (`site-a → site-b → site-c`).
+1. ✅ Scaffold + `HACluster` v1alpha1 CRD.
+2. ✅ `internal/remoteclient`: remote client cache, secret redaction in logs.
+3. ✅ Observation Reconcile: per-site observation (`status.sites[]`), `Available` / `Degraded` conditions.
+4. ✅ `internal/promotion`: `Fence` + `Promote` + `FlipCiliumService`, manual failover via the `ha.cnpg.io/promote: <site>` annotation (`Manual` mode), `FailoverInProgress` condition, `Failover*` / `PromoteRejected` events.
+5. ✅ Cilium Cluster Mesh integration in the promotion path (flip `service.cilium.io/global` + `affinity`, see [§9](#9-service-mesh-integration--cilium-cluster-mesh)).
+6. ✅ Split-brain detection: `SplitBrain` condition when several sites are CNPG-primary+ready.
+7. ✅ DR failover: the sequence no longer aborts when the old primary has fully disappeared (`NotFound` tolerated on Fence / Cilium flip of the old site).
+8. ✅ Automatic topology reconfiguration after a failover: CRD fields `replicationEndpoint` (per site) + `failover.rejoinPolicy` (`Manual` | `AutoReplica`), `internal/promotion.Reconfigure`. Surviving replicas follow the new primary; a returning old primary is either fenced (`Manual`) or rebuilt as a replica (`AutoReplica`).
+9. ✅ Cross-site CA prerequisite documented ([§9.6](#96-cross-site-ca-prerequisite-streaming-replication-trust)).
+10. ✅ `Automatic` mode: in-RAM failure counter (mutex), `failureThreshold`, fires without annotation, requeue at the `healthCheckIntervalSeconds` cadence, split-brain guard. Validated end-to-end on KinD.
+11. ✅ Rejoin safety fix: `reconcileReplicaTopology` now reclassifies each site through an **authoritative re-read** of the CNPG CR (not the status-mutated observation buffer) — a just-demoted old primary is no longer silently rebuilt as a replica, bypassing `rejoinPolicy=Manual`. Regression guard `TestAutomaticFailover_OldPrimaryFencedNotReconfigured`.
+12. ✅ Prometheus metrics: `internal/metrics` (`cnpg_ha_current_primary_site`, `_site_reachable`, `_site_ready`, `_split_brain`, `cnpg_ha_failover_total{mode}`), registered in the controller-runtime registry. `replica_lag_seconds` not exposed (see §10.2 — CNPG does not expose the lag).
+13. ✅ `internal/health` extracted: `Probe` + `SiteHealth` (pure, testable), `parseCluster`; the controller no longer holds inline observation logic. Exposes `timelineID` as a progress proxy.
+14. ✅ `promotionPolicy` applied in `chooseTarget`: `Ordered` (spec order) and `MostAdvancedLSN` (highest timeline, tie-break on spec order — timeline proxy, not a true LSN).
+15. ✅ `CHANGELOG.md` (Keep a Changelog format): `[Unreleased]` section covering additions, fixes, CRD schema changes (`replicationEndpoint`, `rejoinPolicy`) and known limitations.
+16. ✅ `remoteclient` cache refreshed on rotation: keyed by the kubeconfig Secret's `resourceVersion` (a rotated kubeconfig is picked up on the next reconcile, not only on a manager restart). Graceful degradation when the Secret is transiently unreadable but a client is already cached.
+17. ✅ **envtest** integration tests (real API server, run by `make test`): minimal CNPG CRD fixture (`test/crd/`), Ginkgo specs covering *observation* (status + conditions) and *end-to-end manual failover* (remoteclient backed by a kubeconfig derived from the envtest `rest.Config` → real Promote/Fence/Cilium flip/strip-annotation/status). The exhaustive matrix (split-brain, DR, topology, auto) stays covered by the fast deterministic fake-client suites.
+18. ✅ Anti-flapping: post-failover stabilization window (`max(30s, 3×healthCheckInterval)`, based on the persisted `Status.LastFailoverTime`). Prevents the `A→B→C` cascade caused by the CNPG promotion restart of the new primary being observed as transiently unhealthy. Guard `TestAutomaticFailover_StabilizationCooldown`.
+19. ✅ Real scenario validated on KinD 3-sites with a **shared CA** (`spec.certificates.{server,client}CASecret`): primary crash → single auto failover → stabilization (no cascade) → old primary return → re-fence under `rejoinPolicy=Manual`, with no lasting split-brain. Real cross-site streaming confirmed (§9.6 prerequisite cleared via a shared EC CA distribution).
+20. ✅ controller-runtime events API migration: `events.EventRecorder` (`Eventf`) via `mgr.GetEventRecorder`, no more deprecated `record.EventRecorder` or `//nolint:staticcheck`. Tests run against `events.FakeRecorder` (same rendered text → assertions unchanged).
+21. ✅ Reproducible scripted e2e (`hack/e2e/`, targets `make e2e-shared-ca-setup` / `e2e-auto-failover` / `e2e-shared-ca` / `e2e-shared-ca-teardown`): shared EC P-256 CA setup + 3 sites streaming, then crash → single failover → return scenario with strict assertions (non-zero on cascade/split-brain/regression). Validated end-to-end.
+22. ✅ Intra-cluster HA vs cross-site failover boundary confirmed on KinD: site-a in `instances: 3` (1 primary + 2 local standbys) coexists with cross-site replication (4 standbys on the site-a side). cnpg-ha sees the site as **one logical unit** (agnostic to the instance count). Killing the local primary pod → CNPG promotes an intra-site standby; cnpg-ha **does NOT trigger any cross-site failover** (`FailoverStarted=0`, `currentPrimary` stays site-a) — the `failureThreshold` absorbs the blip. Matches the project scope (intra-cluster HA delegated to CNPG).
+23. ✅ Source of truth for the current primary: `status.currentPrimarySite` keeps the last accepted primary even during a transient outage; `runPromotion` fences/flips that current site rather than `spec.primary`. Guard `TestAutomaticFailover_UsesStatusCurrentPrimaryAsOldPrimary` for chained failovers (`site-a → site-b → site-c`).
 
-### 10.2 Restant
+### 10.2 Remaining
 
-| # | Sujet | Détail |
+| # | Topic | Detail |
 |---|---|---|
-| 1 | **`MostAdvancedLSN` exact + `cnpg_ha_replica_lag_seconds`** | Bloqués par la même cause : `Cluster.status` CNPG n'expose ni LSN ni lag. Nécessite une sonde dédiée (lecture `pg_stat_replication` / `pg_last_wal_receive_lsn`) — décision d'archi à prendre (sortir du « dependency-light » read-only ?). En attendant : proxy `timelineID`. |
-| 2 | **Promotion de l'API en `v1beta1`** | Une fois le schéma stabilisé : webhook de conversion, plus de breaking sans dépréciation. |
+| 1 | **Exact `MostAdvancedLSN` + `cnpg_ha_replica_lag_seconds`** | Both blocked by the same cause: `Cluster.status` from CNPG exposes neither LSN nor lag. Requires a dedicated probe (`pg_stat_replication` / `pg_last_wal_receive_lsn` read) — an architectural decision to take (do we step out of the "dependency-light" read-only stance?). Meanwhile: `timelineID` proxy. |
+| 2 | **Promote the API to `v1beta1`** | Once the schema has stabilised: conversion webhook, no more breaking changes without deprecation. |

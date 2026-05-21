@@ -1,118 +1,118 @@
 # ONBOARDING.md — cnpg-ha
 
-> Tu arrives sur le projet. Ce document te fait passer de **rien d'installé** à **mon premier Reconcile lancé en local** en ~30 minutes.
-> Public visé : Platform Engineer / SRE, **peu ou pas d'expérience Go**.
+> You just joined the project. This document takes you from **nothing installed** to **my first Reconcile running locally** in ~30 minutes.
+> Audience: Platform Engineer / SRE, **little or no Go experience**.
 
 ---
 
-## 1. Avant de commencer — ce que tu dois savoir
+## 1. Before you start — what you need to know
 
-- **Kubernetes** : tu connais déjà. Tu sais ce qu'est une CRD, un controller, un Reconcile.
-- **Go** : pas besoin d'être à l'aise. Un opérateur, c'est très peu de Go "compliqué" — c'est surtout du déclaratif + des appels à l'API K8s.
-- **CNPG** : tu peux apprendre au fur et à mesure. Voir [EXPLAIN.md](./EXPLAIN.md) pour le vocabulaire.
+- **Kubernetes**: you already know it. You know what a CRD, a controller, a Reconcile are.
+- **Go**: no need to be fluent. An operator involves very little tricky Go — it is mostly declarative code plus calls to the K8s API.
+- **CNPG**: you can learn it as you go. See [EXPLAIN.md](./EXPLAIN.md) for the vocabulary.
 
-Si tu hésites entre lire ce document ou les autres :
+If you are unsure whether to read this document or the others:
 
-1. **ONBOARDING.md** (ici) → installer, builder, faire tourner.
-2. [EXPLAIN.md](./EXPLAIN.md) → comprendre **ce qu'on construit** et **pourquoi**.
-3. [ARCHITECTURE.md](./ARCHITECTURE.md) → comprendre **comment** c'est construit.
-4. [CONVENTION.md](./CONVENTION.md) → règles à suivre quand tu écris du code.
-5. [SUPPLY_CHAIN.md](./SUPPLY_CHAIN.md) → pipeline supply chain (SBOM, signature, SLSA, vérifications).
+1. **ONBOARDING.md** (here) → install, build, run.
+2. [EXPLAIN.md](./EXPLAIN.md) → understand **what we build** and **why**.
+3. [ARCHITECTURE.md](./ARCHITECTURE.md) → understand **how** it is built.
+4. [CONVENTION.md](./CONVENTION.md) → rules to follow when writing code.
+5. [SUPPLY_CHAIN.md](./SUPPLY_CHAIN.md) → supply chain pipeline (SBOM, signing, SLSA, verification).
 
 ---
 
-## 2. Outils à installer
+## 2. Tools to install
 
-| Outil | Pourquoi | Où l'installer |
+| Tool | Why | Where to install |
 |---|---|---|
-| **Go ≥ 1.22** | Compiler le projet | [go.dev/dl](https://go.dev/dl/) ou ton gestionnaire de paquets |
-| **kubectl** | Parler à un cluster | [doc officielle](https://kubernetes.io/docs/tasks/tools/) |
-| **Kubebuilder** | Scaffolding (déjà fait, mais utile pour la doc) | [book.kubebuilder.io/quick-start](https://book.kubebuilder.io/quick-start.html#installation) |
-| **KinD** | Cluster K8s local pour tester | [kind.sigs.k8s.io](https://kind.sigs.k8s.io/docs/user/quick-start/#installation) |
-| **Docker** (ou runtime compatible) | Runtime pour KinD | [docker.com/get-started](https://www.docker.com/get-started/) |
-| **golangci-lint** | Linter Go (CI le lance, mieux en local) | [golangci-lint.run/welcome/install](https://golangci-lint.run/welcome/install/) — note : `make lint` le télécharge automatiquement dans `bin/` si absent |
-| **make** | Lancer les commandes du projet | Inclus dans la plupart des OS / GNU make sur Windows via WSL ou Chocolatey |
+| **Go ≥ 1.22** | Build the project | [go.dev/dl](https://go.dev/dl/) or your package manager |
+| **kubectl** | Talk to a cluster | [official docs](https://kubernetes.io/docs/tasks/tools/) |
+| **Kubebuilder** | Scaffolding (already done, but handy for the docs) | [book.kubebuilder.io/quick-start](https://book.kubebuilder.io/quick-start.html#installation) |
+| **KinD** | Local K8s cluster for testing | [kind.sigs.k8s.io](https://kind.sigs.k8s.io/docs/user/quick-start/#installation) |
+| **Docker** (or a compatible runtime) | Runtime for KinD | [docker.com/get-started](https://www.docker.com/get-started/) |
+| **golangci-lint** | Go linter (CI runs it, better locally too) | [golangci-lint.run/welcome/install](https://golangci-lint.run/welcome/install/) — note: `make lint` downloads it into `bin/` automatically when missing |
+| **make** | Run project commands | Bundled on most OSes / GNU make on Windows via WSL or Chocolatey |
 
-Vérification :
+Sanity check:
 
 ```bash
-go version            # go1.22 ou plus
+go version            # go1.22 or newer
 kubectl version --client
 kubebuilder version
 kind version
-docker info           # le runtime de conteneurs doit répondre
+docker info           # the container runtime must respond
 golangci-lint version
 ```
 
-**Éditeur** : VS Code + extension "Go" (officielle Google) couvre 95 % des besoins. JetBrains GoLand si tu préfères, Neovim avec `gopls` également. Configure l'éditeur pour exécuter **gofmt** et **goimports** au save — non-négociable.
+**Editor**: VS Code + the "Go" extension (official, by Google) covers 95% of your needs. JetBrains GoLand if you prefer, Neovim with `gopls` works too. Configure the editor to run **gofmt** and **goimports** on save — non-negotiable.
 
 ---
 
-## 3. Cloner et builder
+## 3. Clone and build
 
 ```bash
-git clone https://github.com/davidesteban/cnpg-ha.git
+git clone https://github.com/davidesteban91120-jpg/cnpg-ha.git
 cd cnpg-ha
 make build
 ```
 
-Si tu obtiens `bin/manager` à la fin, c'est gagné. Sinon :
+If you get `bin/manager` at the end, you are done. Otherwise:
 
-| Erreur | Solution |
+| Error | Fix |
 |---|---|
-| `go: not found` | Go pas dans le PATH. `export PATH=$PATH:/usr/local/go/bin` |
-| `cannot find module` | `go mod download` puis retenter |
-| `controller-gen: command not found` | `make manifests` télécharge l'outil — relance. |
+| `go: not found` | Go not in PATH. `export PATH=$PATH:/usr/local/go/bin` |
+| `cannot find module` | `go mod download` then retry |
+| `controller-gen: command not found` | `make manifests` downloads the tool — retry. |
 
 ---
 
-## 4. Lancer les tests
+## 4. Run the tests
 
 ```bash
 make test
 ```
 
-La première exécution télécharge `envtest` (un mini API server K8s + etcd). Ça prend ~30 s. Les exécutions suivantes sont rapides (~10 s).
+The first run downloads `envtest` (a mini K8s API server + etcd). It takes ~30 s. Subsequent runs are fast (~10 s).
 
-**Ce qui se passe sous le capot** :
+**What happens under the hood**:
 
-- `envtest` lance un `kube-apiserver` + `etcd` en local, **sans kubelet** (pas de pods réels).
-- Les tests créent des CR `HACluster` dedans, et vérifient que le Reconciler fait ce qu'il faut.
-- C'est suffisant pour 90 % des tests. Les vrais tests cross-cluster sont en `test/e2e/` et tournent en CI sur KinD.
+- `envtest` boots a `kube-apiserver` + `etcd` locally, **without a kubelet** (no real pods).
+- Tests create `HACluster` CRs against it and assert the Reconciler does the right thing.
+- Enough for 90% of tests. The real cross-cluster tests live under `test/e2e/` and run in CI on KinD.
 
 ---
 
-## 5. Lancer l'opérateur en local contre un cluster
+## 5. Run the operator locally against a cluster
 
-### 5.1 Créer un cluster KinD
+### 5.1 Create a KinD cluster
 
 ```bash
 kind create cluster --name cnpg-ha-dev
 kubectl cluster-info --context kind-cnpg-ha-dev
 ```
 
-### 5.2 Installer CNPG (nécessaire pour que les CR cibles existent)
+### 5.2 Install CNPG (required so the target CRs exist)
 
 ```bash
 kubectl apply --server-side -f \
   https://raw.githubusercontent.com/cloudnative-pg/cloudnative-pg/release-1.24/releases/cnpg-1.24.0.yaml
 ```
 
-### 5.3 Installer notre CRD
+### 5.3 Install our CRD
 
 ```bash
-make install   # applique config/crd/bases/ha.cnpg.io_haclusters.yaml
+make install   # applies config/crd/bases/ha.cnpg.io_haclusters.yaml
 ```
 
-### 5.4 Lancer l'opérateur localement
+### 5.4 Run the operator locally
 
 ```bash
 make run
 ```
 
-Le manager se lance **en local**, mais parle au cluster KinD via ton `~/.kube/config`. Très pratique pour itérer — pas besoin de rebuilder une image à chaque modif.
+The manager runs **locally**, but talks to the KinD cluster through your `~/.kube/config`. Very handy for iteration — no image rebuild needed.
 
-### 5.5 Créer une `HACluster` de test
+### 5.5 Create a test `HACluster`
 
 ```bash
 kubectl apply -f config/samples/ha_v1alpha1_hacluster.yaml
@@ -120,15 +120,15 @@ kubectl get hacluster prod-db -n db
 kubectl describe hacluster prod-db -n db
 ```
 
-(Le CR référence des clusters CNPG et Secrets kubeconfig qui n'existent pas encore — c'est normal en dev. Tu verras les erreurs dans les logs du manager, et c'est exactement ce qu'on veut pour écrire la logique de Reconcile.)
+(The CR references CNPG clusters and kubeconfig Secrets that do not yet exist — expected in dev. You will see errors in the manager's logs, which is exactly what you want when writing Reconcile logic.)
 
 ---
 
-## 6. Petit kit de survie Go pour SRE
+## 6. Survival kit: Go for SREs
 
-> Trois choses qui dépaysent quand on vient d'ailleurs (Python/TypeScript/Java).
+> Three things that feel unusual when coming from elsewhere (Python/TypeScript/Java).
 
-### 6.1 Pas d'exceptions — chaque erreur est une valeur
+### 6.1 No exceptions — every error is a value
 
 ```go
 file, err := os.Open("config.yaml")
@@ -138,100 +138,100 @@ if err != nil {
 defer file.Close()
 ```
 
-Trois choses à retenir :
-- `err != nil` est le pattern le plus fréquent du langage. Tu vas le lire 100 fois par jour.
-- `%w` "wrappe" l'erreur — tu peux ensuite faire `errors.Is(err, os.ErrNotExist)` plus haut.
-- `defer x.Close()` exécute `x.Close()` **à la sortie de la fonction**, peu importe le chemin (return, panic). Super pour les ressources.
+Three things to remember:
+- `err != nil` is the most frequent pattern in the language. You will read it 100 times a day.
+- `%w` wraps the error — you can later run `errors.Is(err, os.ErrNotExist)` up the call stack.
+- `defer x.Close()` executes `x.Close()` **on function exit**, whatever the path (return, panic). Great for resources.
 
-### 6.2 Casse = visibilité
+### 6.2 Case = visibility
 
-| Code | Visibilité |
+| Code | Visibility |
 |---|---|
-| `Promote(...)` | **Exporté** (utilisable hors du package) |
-| `promote(...)` | **Privé** (seulement dans le package) |
-| `Cluster.Name` | Champ exporté |
-| `cluster.name` | Champ privé |
+| `Promote(...)` | **Exported** (usable from outside the package) |
+| `promote(...)` | **Private** (only inside the package) |
+| `Cluster.Name` | Exported field |
+| `cluster.name` | Private field |
 
-Pas de mot-clé `public`/`private`. C'est la **première lettre** qui décide.
+No `public`/`private` keyword. The **first letter** decides.
 
-### 6.3 Interfaces implicites
+### 6.3 Implicit interfaces
 
-En Java, tu écris `class Foo implements Bar`. En Go, tu **n'écris rien** : si ton type a les bonnes méthodes, il satisfait l'interface, automatiquement.
+In Java you write `class Foo implements Bar`. In Go you **write nothing**: if your type has the right methods, it satisfies the interface automatically.
 
 ```go
 type Prober interface {
     Probe(ctx context.Context) error
 }
 
-type HTTPProber struct{} 
+type HTTPProber struct{}
 func (h HTTPProber) Probe(ctx context.Context) error { ... }
-// HTTPProber satisfait Prober — pas besoin de le déclarer.
+// HTTPProber satisfies Prober — no need to declare it.
 ```
 
-Conséquence : on découple beaucoup, et tester devient très facile (on injecte une fausse implémentation).
+Consequence: tight decoupling, and testing becomes very easy (inject a fake implementation).
 
 ---
 
-## 7. Premier réflexe quand un test échoue
+## 7. First reflex when a test fails
 
-1. **Lire le message**. Vraiment. Go a des messages d'erreur courts mais précis. Si tu ne comprends pas, le copier-coller dans une recherche te trouve presque toujours la cause.
-2. **Lancer un seul test** :
+1. **Read the message.** Really. Go has short but precise error messages. If you do not understand, pasting it into a search almost always finds the cause.
+2. **Run a single test**:
    ```bash
    go test -run TestParseClusterStatus ./internal/controller/...
    ```
-3. **Mettre des logs** : `t.Logf("got=%v want=%v", got, want)`. Apparaissent avec `go test -v`.
-4. **Bloquer le runtime de test** (debug par insertion) : `time.Sleep(time.Hour)` puis `dlv attach <pid>` si tu veux un debugger. En pratique, les `t.Logf` suffisent 95 % du temps.
+3. **Add logs**: `t.Logf("got=%v want=%v", got, want)`. They show up with `go test -v`.
+4. **Pause the test runtime** (debug by injection): `time.Sleep(time.Hour)` then `dlv attach <pid>` for a debugger. In practice, `t.Logf` is enough 95% of the time.
 
 ---
 
-## 8. Premier réflexe quand l'opérateur ne fait pas ce qu'on attend
+## 8. First reflex when the operator does not do what you expect
 
-1. **Lire les logs de `make run`** — ils sont structurés (logr/JSON). Le bon mot-clé : `"reconciling"`.
-2. **Vérifier le status du CR** :
+1. **Read the `make run` logs** — structured (logr/JSON). The keyword you want: `"reconciling"`.
+2. **Check the CR status**:
    ```bash
    kubectl get hacluster prod-db -n db -o yaml | yq '.status'
    ```
-3. **Vérifier les events** :
+3. **Check the events**:
    ```bash
    kubectl describe hacluster prod-db -n db
    ```
-4. **Forcer un re-Reconcile** : annoter l'objet (`kubectl annotate hacluster prod-db -n db reconcile=$(date +%s) --overwrite`). Tout changement de `metadata` déclenche un nouveau Reconcile.
-5. Augmenter la verbosité : relancer `make run` avec `-zap-log-level=debug`.
+4. **Force a re-Reconcile**: annotate the object (`kubectl annotate hacluster prod-db -n db reconcile=$(date +%s) --overwrite`). Any metadata change triggers a new Reconcile.
+5. Bump verbosity: restart `make run` with `-zap-log-level=debug`.
 
 ---
 
-## 9. Glossaire express
+## 9. Quick glossary
 
-| Terme | Sens court |
+| Term | Short meaning |
 |---|---|
-| **CR / CRD** | Custom Resource / CR Definition — le CR est l'instance, la CRD le schéma. |
-| **Reconcile** | Boucle qui converge l'état observé vers l'état désiré. |
-| **Operator** | Controller + CRD packagés pour gérer un domaine métier. |
-| **Manager** | Le process qui héberge un ou plusieurs controllers (controller-runtime). |
-| **envtest** | API server + etcd locaux, sans kubelet. Tests rapides. |
-| **KinD** | Kubernetes-in-Docker. Vrai cluster, sur ton laptop. |
-| **CNPG** | CloudNativePG, l'opérateur Postgres qu'on orchestre. |
-| **LSN** | Log Sequence Number — position dans le WAL Postgres. Plus c'est haut, plus c'est avancé. |
-| **Fencing** | Empêcher un primary "mort mais vivant" d'accepter encore des writes. |
+| **CR / CRD** | Custom Resource / CR Definition — the CR is the instance, the CRD the schema. |
+| **Reconcile** | Loop that converges the observed state toward the desired state. |
+| **Operator** | Controller + CRD packaged to manage a domain. |
+| **Manager** | The process hosting one or more controllers (controller-runtime). |
+| **envtest** | Local API server + etcd, no kubelet. Fast tests. |
+| **KinD** | Kubernetes-in-Docker. Real cluster, on your laptop. |
+| **CNPG** | CloudNativePG, the Postgres operator we orchestrate. |
+| **LSN** | Log Sequence Number — position in the Postgres WAL. Higher means further ahead. |
+| **Fencing** | Stop a "zombie" primary from still accepting writes. |
 
-Pour les termes métier (replica cluster, WAL, RTO/RPO) → [EXPLAIN.md](./EXPLAIN.md).
+Domain terms (replica cluster, WAL, RTO/RPO) → [EXPLAIN.md](./EXPLAIN.md).
 
 ---
 
-## 10. Qui demander quoi
+## 10. Who to ask what
 
-| Question | Bon interlocuteur |
+| Question | Best source |
 |---|---|
-| Pourquoi tel choix d'archi ? | [ARCHITECTURE.md](./ARCHITECTURE.md) §8 ou maintainer |
-| Comment écrire du Go idiomatique ? | [CONVENTION.md](./CONVENTION.md) + [Effective Go](https://go.dev/doc/effective_go) |
-| CNPG fait-il déjà X ? | [docs CNPG](https://cloudnative-pg.io/documentation/current/) avant tout |
-| Comment vérifier la supply chain d'une release ? | [SUPPLY_CHAIN.md](./SUPPLY_CHAIN.md) |
+| Why this architectural choice? | [ARCHITECTURE.md](./ARCHITECTURE.md) §8 or maintainer |
+| How to write idiomatic Go? | [CONVENTION.md](./CONVENTION.md) + [Effective Go](https://go.dev/doc/effective_go) |
+| Does CNPG already do X? | [CNPG docs](https://cloudnative-pg.io/documentation/current/) first |
+| How do I verify a release's supply chain? | [SUPPLY_CHAIN.md](./SUPPLY_CHAIN.md) |
 
 ---
 
-## 11. Avant de committer — checklist locale
+## 11. Before you commit — local checklist
 
-> Ne **jamais** pousser sans avoir passé cette checklist. La CI la repassera, mais autant ne pas attendre.
+> Never push without running this checklist. CI will re-run it, but better catch it locally.
 
 ### 11.1 Lint
 
@@ -239,57 +239,55 @@ Pour les termes métier (replica cluster, WAL, RTO/RPO) → [EXPLAIN.md](./EXPLA
 make lint
 ```
 
-`golangci-lint` est téléchargé automatiquement dans `bin/` la première fois (~1 min). Les exécutions suivantes sont quasi instantanées.
+`golangci-lint` is downloaded into `bin/` automatically on the first run (~1 min). Subsequent runs are near-instant.
 
-Si tu vois un faux positif `misspell` sur un mot français (ex. "démarrage" → "marriage"), ajoute le mot dans `.golangci.yml` sous `linters.settings.misspell.ignore-rules`.
-
-### 11.2 Tests envtest
+### 11.2 envtest tests
 
 ```bash
 make test
 ```
 
-Lance les tests unitaires + intégration via `envtest` (API server + etcd en local, sans kubelet). Couverture affichée par package.
+Runs unit + integration tests through `envtest` (local API server + etcd, no kubelet). Per-package coverage is printed.
 
-Pour ne lancer qu'un test :
+To run a single test:
 
 ```bash
 go test -run TestParseClusterStatus -v ./internal/controller/...
 ```
 
-### 11.3 Run end-to-end sur KinD
+### 11.3 End-to-end run on KinD
 
-Préalable : un runtime de conteneurs actif (`docker info` doit répondre).
+Prerequisite: a running container runtime (`docker info` must respond).
 
 ```bash
-# 1. Créer un cluster local
+# 1. Create a local cluster
 kind create cluster --name cnpg-ha-dev --wait 60s
 kubectl cluster-info --context kind-cnpg-ha-dev
 
-# 2. Installer notre CRD
+# 2. Install our CRD
 make install
 
-# 3. Lancer le manager en local (parle au KinD via ~/.kube/config)
-make run                            # bloquant — lance dans un autre terminal
+# 3. Run the manager locally (talks to KinD via ~/.kube/config)
+make run                            # blocks — launch in a separate terminal
 
-# 4. Appliquer un HACluster d'exemple
+# 4. Apply a sample HACluster
 kubectl create namespace db
 kubectl apply -f config/samples/ha_v1alpha1_hacluster.yaml
 kubectl get hacluster -A
 kubectl describe hacluster prod-db -n db
 
-# 5. Nettoyer quand tu as fini
+# 5. Clean up when done
 kind delete cluster --name cnpg-ha-dev
 ```
 
-> `make run` lance le manager **localement**. Pas besoin de builder/pousser une image Docker pour itérer. Les logs apparaissent dans ton terminal.
+> `make run` starts the manager **locally**. No need to build or push a Docker image to iterate. Logs land in your terminal.
 
-### 11.4 Validation CRD — cas invalides
+### 11.4 CRD validation — invalid cases
 
-Pour confirmer que les `+kubebuilder:validation:*` markers font leur job, essaie d'appliquer des CR volontairement invalides :
+To confirm the `+kubebuilder:validation:*` markers do their job, try applying intentionally invalid CRs:
 
 ```bash
-# Replicas vide → doit échouer (MinItems=1)
+# Empty replicas → must be rejected (MinItems=1)
 cat <<'EOF' | kubectl apply -f -
 apiVersion: ha.cnpg.io/v1alpha1
 kind: HACluster
@@ -299,9 +297,9 @@ spec:
     clusterRef: { name: pg, namespace: db }
   replicas: []
 EOF
-# Attendu : "spec.replicas: Invalid value: ... should have at least 1 items"
+# Expected: "spec.replicas: Invalid value: ... should have at least 1 items"
 
-# Mode invalide → doit échouer (Enum)
+# Invalid mode → must be rejected (Enum)
 cat <<'EOF' | kubectl apply -f -
 apiVersion: ha.cnpg.io/v1alpha1
 kind: HACluster
@@ -314,9 +312,9 @@ spec:
       clusterRef: { name: pg, namespace: db }
   failover: { mode: WrongMode }
 EOF
-# Attendu : "spec.failover.mode: Unsupported value: \"WrongMode\""
+# Expected: "spec.failover.mode: Unsupported value: \"WrongMode\""
 
-# failureThreshold trop bas → doit échouer (Minimum=2)
+# failureThreshold too low → must be rejected (Minimum=2)
 cat <<'EOF' | kubectl apply -f -
 apiVersion: ha.cnpg.io/v1alpha1
 kind: HACluster
@@ -329,33 +327,33 @@ spec:
       clusterRef: { name: pg, namespace: db }
   failover: { failureThreshold: 1 }
 EOF
-# Attendu : "spec.failover.failureThreshold: Invalid value: 1: should be greater than or equal to 2"
+# Expected: "spec.failover.failureThreshold: Invalid value: 1: should be greater than or equal to 2"
 ```
 
-Si l'un de ces cas passe sans erreur, c'est un bug — soit le marker est mal écrit, soit `make manifests` n'a pas été lancé après modification des types.
+If any of those cases is accepted, that is a bug — either the marker is wrong, or `make manifests` was not run after editing the types.
 
-### 11.5 Checklist condensée
+### 11.5 Condensed checklist
 
-À copier dans la description de PR (voir [CONVENTION.md §3](./CONVENTION.md#partie-3--checklist-de-pr)) :
+Paste into the PR description (see [CONVENTION.md §3](./CONVENTION.md#part-3--pr-checklist)):
 
 ```text
-- [ ] make lint            (0 issue)
-- [ ] make test            (tous les paquets OK)
-- [ ] make run sur KinD    (manager démarre sans erreur)
-- [ ] CRD valide les cas légitimes ET rejette les invalides
-- [ ] godoc à jour sur les symboles exportés modifiés
-- [ ] CHANGELOG.md mis à jour si schéma CRD touché
-- [ ] Aucun secret/kubeconfig committé
+- [ ] make lint            (0 issues)
+- [ ] make test            (every package green)
+- [ ] make run on KinD     (manager starts without error)
+- [ ] CRD validates legitimate cases AND rejects invalid ones
+- [ ] godoc up to date for changed exported symbols
+- [ ] CHANGELOG.md updated if the CRD schema changed
+- [ ] No secret/kubeconfig committed
 ```
 
 ---
 
-## 12. Prochaine étape
+## 12. Next step
 
-Maintenant que tu builds et tu lances :
+Now that you can build and run:
 
-1. Lis [EXPLAIN.md](./EXPLAIN.md) (10 min) — c'est court et ça te donne le **pourquoi** complet.
-2. Survole [ARCHITECTURE.md](./ARCHITECTURE.md) — surtout §3 (boucle Reconcile) et §7 (points sensibles SRE).
-3. Cherche une issue taggée `good-first-issue` ou demande au maintainer.
+1. Read [EXPLAIN.md](./EXPLAIN.md) (10 min) — short and gives you the full **why**.
+2. Skim [ARCHITECTURE.md](./ARCHITECTURE.md) — especially §3 (Reconcile loop) and §7 (SRE-sensitive points).
+3. Pick a `good-first-issue` or ask the maintainer.
 
-Bienvenue.
+Welcome.

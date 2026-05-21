@@ -33,8 +33,9 @@ spec:
     name: v1alpha1
     schema:
       openAPIV3Schema:
-        description: HACluster orchestre la bascule multi-cluster d'un groupe de Clusters
-          CNPG.
+        description: |-
+          HACluster orchestrates the cross-cluster failover of a group of CNPG
+          Clusters.
         properties:
           apiVersion:
             description: |-
@@ -54,17 +55,17 @@ spec:
           metadata:
             type: object
           spec:
-            description: spec définit l'état désiré.
+            description: Spec defines the desired state.
             properties:
               failover:
-                description: 'Failover : paramètres de décision de bascule.'
+                description: 'Failover: failover decision parameters.'
                 properties:
                   failureThreshold:
                     default: 3
                     description: |-
-                      FailureThreshold : nombre de sondes consécutives en échec avant de
-                      considérer le primary HS. Toujours > 1 pour éviter qu'un blip réseau
-                      déclenche un failover.
+                      FailureThreshold: number of consecutive failed probes before the
+                      primary is considered down. Always greater than 1 so a transient
+                      network blip cannot trigger a failover.
                     format: int32
                     maximum: 20
                     minimum: 2
@@ -72,23 +73,23 @@ spec:
                   healthCheckIntervalSeconds:
                     default: 10
                     description: |-
-                      HealthCheckIntervalSeconds : période entre deux sondes du primary.
-                      10s est un bon point de départ — trop court = flapping, trop long
-                      = RTO dégradé.
+                      HealthCheckIntervalSeconds: period between two primary probes.
+                      10 s is a good starting point — too short causes flapping, too long
+                      degrades the RTO.
                     format: int32
                     maximum: 300
                     minimum: 1
                     type: integer
                   mode:
                     default: Manual
-                    description: 'Mode : Automatic ou Manual. Voir FailoverMode.'
+                    description: 'Mode: Automatic or Manual. See FailoverMode.'
                     enum:
                     - Automatic
                     - Manual
                     type: string
                   promotionPolicy:
                     default: MostAdvancedLSN
-                    description: 'PromotionPolicy : voir PromotionPolicy.'
+                    description: 'PromotionPolicy: see PromotionPolicy.'
                     enum:
                     - MostAdvancedLSN
                     - Ordered
@@ -104,20 +105,20 @@ spec:
                     type: string
                 type: object
               primary:
-                description: 'Primary : site qui sert actuellement les écritures.'
+                description: 'Primary: site currently serving writes.'
                 properties:
                   clusterRef:
                     description: |-
-                      ClusterRef pointe vers le CR CNPG Cluster du site local / bootstrap.
-                      Il sert de primary au démarrage, mais après une bascule le primary
-                      courant peut être l'un des sites de Spec.Replicas.
+                      ClusterRef points to the CNPG Cluster CR for the local / bootstrap
+                      site. It serves as the primary at startup; after a failover the
+                      current primary may be any of the sites listed in Spec.Replicas.
                     properties:
                       name:
-                        description: Name du CR CNPG Cluster.
+                        description: Name of the CNPG Cluster CR.
                         minLength: 1
                         type: string
                       namespace:
-                        description: Namespace du CR CNPG Cluster.
+                        description: Namespace of the CNPG Cluster CR.
                         minLength: 1
                         type: string
                     required:
@@ -126,10 +127,11 @@ spec:
                     type: object
                   name:
                     description: |-
-                      Name est l'identifiant logique du site local / bootstrap (ex. "site-a").
-                      Cohérent avec ReplicaSite.Name — peut être la valeur initiale de
-                      status.currentPrimarySite et sert de clé dans les métriques. Doit être
-                      unique au sein du HACluster (ne pas réutiliser un nom de replica).
+                      Name is the logical identifier of the local / bootstrap site
+                      (e.g. "site-a"). Same semantics as ReplicaSite.Name — it may be the
+                      initial value of status.currentPrimarySite and is used as a key in
+                      the metrics. Must be unique within the HACluster (do not reuse a
+                      replica name).
                     minLength: 1
                     pattern: ^[a-z0-9]([-a-z0-9]*[a-z0-9])?$
                     type: string
@@ -151,21 +153,21 @@ spec:
                 - name
                 type: object
               replicas:
-                description: 'Replicas : sites distants prêts à être promus.'
+                description: 'Replicas: remote sites ready to be promoted.'
                 items:
-                  description: ReplicaSite décrit un cluster CNPG distant servant
-                    de replica.
+                  description: ReplicaSite describes a remote CNPG cluster acting
+                    as a replica.
                   properties:
                     clusterRef:
-                      description: ClusterRef pointe vers le CR CNPG Cluster dans
-                        le cluster distant.
+                      description: ClusterRef points to the CNPG Cluster CR inside
+                        the remote cluster.
                       properties:
                         name:
-                          description: Name du CR CNPG Cluster.
+                          description: Name of the CNPG Cluster CR.
                           minLength: 1
                           type: string
                         namespace:
-                          description: Namespace du CR CNPG Cluster.
+                          description: Namespace of the CNPG Cluster CR.
                           minLength: 1
                           type: string
                       required:
@@ -174,12 +176,13 @@ spec:
                       type: object
                     kubeconfigSecretRef:
                       description: |-
-                        KubeconfigSecretRef pointe vers un Secret du cluster local qui contient
-                        le kubeconfig pour se connecter au cluster distant. L'opérateur lit
-                        le Secret au démarrage et le rafraîchit selon un TTL interne.
+                        KubeconfigSecretRef points to a Secret in the local cluster that
+                        holds the kubeconfig used to connect to the remote cluster. The
+                        operator reads the Secret at startup and refreshes it on an internal
+                        TTL.
 
-                        Sécurité : la clé pointée NE DOIT JAMAIS être loggée. Voir
-                        internal/remoteclient pour la logique de redaction.
+                        Security: the key referenced here MUST NEVER be logged. See
+                        internal/remoteclient for the redaction logic.
                       properties:
                         key:
                           description: The key of the secret to select from.  Must
@@ -204,9 +207,9 @@ spec:
                       x-kubernetes-map-type: atomic
                     name:
                       description: |-
-                        Name est l'identifiant logique du site (ex. "site-b"). Doit être
-                        stable et unique au sein du HACluster — sert de clé dans le status
-                        et dans les métriques Prometheus.
+                        Name is the logical identifier of the site (e.g. "site-b"). Must be
+                        stable and unique within the HACluster — it is used as a key in the
+                        status and in Prometheus metrics.
                       minLength: 1
                       pattern: ^[a-z0-9]([-a-z0-9]*[a-z0-9])?$
                       type: string
@@ -233,12 +236,13 @@ spec:
             - replicas
             type: object
           status:
-            description: status reflète l'état observé.
+            description: Status reflects the observed state.
             properties:
               conditions:
                 description: |-
-                  Conditions : état des aspects fonctionnels du HACluster.
-                  Types attendus : "Available", "Progressing", "Degraded", "FailoverInProgress".
+                  Conditions: state of the functional aspects of the HACluster.
+                  Expected types: "Available", "Progressing", "Degraded",
+                  "FailoverInProgress".
                 items:
                   description: Condition contains details for one aspect of the current
                     state of this API Resource.
@@ -299,67 +303,69 @@ spec:
                 x-kubernetes-list-type: map
               currentPrimarySite:
                 description: |-
-                  CurrentPrimarySite : nom du dernier site accepté comme primary par
-                  l'opérateur. Lors d'un failover, ce champ est mis à jour APRÈS la
-                  promotion effective côté CNPG (jamais avant). Si ce site devient
-                  temporairement unhealthy, le champ reste renseigné et l'indisponibilité
-                  est exposée via les conditions.
+                  CurrentPrimarySite: name of the last site accepted as primary by the
+                  operator. On a failover, this field is updated AFTER the CNPG-side
+                  promotion has happened (never before). If that site becomes
+                  transiently unhealthy, the field stays set and the unavailability is
+                  surfaced through the conditions.
                 type: string
               lastFailoverTime:
-                description: 'LastFailoverTime : timestamp du dernier failover réussi.'
+                description: 'LastFailoverTime: timestamp of the last successful failover.'
                 format: date-time
                 type: string
               observedGeneration:
                 description: |-
-                  ObservedGeneration : metadata.generation prise en compte lors du
-                  dernier Reconcile. Permet de savoir si le status reflète le spec courant.
+                  ObservedGeneration: metadata.generation processed by the last
+                  Reconcile. Tells callers whether the status reflects the current spec.
                 format: int64
                 type: integer
               sites:
                 description: |-
-                  Sites : observation détaillée par site (primary + replicas).
-                  Permet l'inspection rapide via
-                  `kubectl get hacluster -o jsonpath='{.status.sites}'` et sert de
-                  base à la logique de promotion.
+                  Sites: per-site detailed observation (primary + replicas). Enables
+                  quick inspection via
+                  `kubectl get hacluster -o jsonpath='{.status.sites}'` and underpins
+                  the promotion logic.
                 items:
                   description: |-
-                    SiteStatus expose l'observation d'un site (primary ou replica) lors du
-                    dernier Reconcile. Sert à l'inspection rapide via kubectl et de base à
-                    la future logique de promotion (qui consulte l'état de chaque candidat).
+                    SiteStatus exposes the observation of a site (primary or replica)
+                    captured during the last Reconcile. It supports quick inspection via
+                    kubectl and is the basis for the promotion logic that consults the
+                    state of each candidate.
                   properties:
                     lastObservedTime:
                       description: |-
-                        LastObservedTime est le timestamp du Reconcile qui a produit cette
-                        observation. Mis à jour à chaque passage, même sans changement d'état.
+                        LastObservedTime is the timestamp of the Reconcile that produced
+                        this observation. Updated on every pass, even without a state change.
                       format: date-time
                       type: string
                     message:
                       description: |-
-                        Message porte un détail libre — typiquement la raison d'un échec
-                        (kubeconfig invalide, Get K8s en erreur, readyInstances=0). Vide
-                        quand le site est reachable et ready.
+                        Message carries a free-form detail — typically the reason for a
+                        failure (invalid kubeconfig, K8s Get error, readyInstances=0). Empty
+                        when the site is reachable and ready.
                       type: string
                     name:
                       description: |-
-                        Name est l'identifiant logique du site, cohérent avec
-                        spec.primary.name ou spec.replicas[].name.
+                        Name is the logical identifier of the site, consistent with
+                        spec.primary.name or spec.replicas[].name.
                       type: string
                     phase:
                       description: |-
-                        Phase reprend status.phase du CR CNPG Cluster (ex. "Cluster in healthy
-                        state"). Vide si le site est unreachable.
+                        Phase mirrors status.phase of the CNPG Cluster CR (e.g. "Cluster in
+                        healthy state"). Empty if the site is unreachable.
                       type: string
                     reachable:
-                      description: Reachable indique si l'API K8s du site a répondu
-                        au dernier Reconcile.
+                      description: |-
+                        Reachable indicates whether the site's K8s API responded during the
+                        last Reconcile.
                       type: boolean
                     ready:
                       description: |-
-                        Ready indique si le CR CNPG Cluster du site a au moins une instance
-                        ready (status.readyInstances > 0).
+                        Ready indicates whether the site's CNPG Cluster CR has at least one
+                        ready instance (status.readyInstances > 0).
                       type: boolean
                     role:
-                      description: Role observé du site lors du dernier Reconcile.
+                      description: Role observed for the site during the last Reconcile.
                       enum:
                       - Primary
                       - Replica

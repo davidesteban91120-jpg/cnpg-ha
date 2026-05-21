@@ -14,11 +14,11 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-// Package v1alpha1 contient les types Go de l'API ha.cnpg.io/v1alpha1.
+// Package v1alpha1 contains the Go types for the ha.cnpg.io/v1alpha1 API.
 //
-// Note Go pour nouveau venu : un package = un dossier. Tous les fichiers
-// .go ici doivent déclarer `package v1alpha1`. Le suffixe v1alpha1 signale
-// que l'API est expérimentale (peut changer sans rétrocompatibilité).
+// Go reminder: one package == one directory. Every .go file in here must
+// declare `package v1alpha1`. The v1alpha1 suffix flags the API as
+// experimental — breaking changes are allowed without a conversion webhook.
 package v1alpha1
 
 import (
@@ -26,36 +26,36 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
-// FailoverMode contrôle si l'opérateur déclenche un failover automatiquement
-// ou attend une action humaine.
+// FailoverMode controls whether the operator promotes a replica
+// automatically or waits for a human action.
 //
 // +kubebuilder:validation:Enum=Automatic;Manual
 type FailoverMode string
 
 const (
-	// FailoverModeAutomatic : l'opérateur promeut un replica dès que le seuil
-	// de défaillance du primary est atteint. À privilégier si la latence de
-	// reprise est critique et le risque de split-brain maîtrisé (fencing OK).
+	// FailoverModeAutomatic: the operator promotes a replica as soon as the
+	// primary failure threshold is reached. Pick this when recovery latency
+	// is critical and the split-brain risk is acceptable (fencing in place).
 	FailoverModeAutomatic FailoverMode = "Automatic"
 
-	// FailoverModeManual : l'opérateur détecte la panne et expose l'état,
-	// mais attend une annotation `ha.cnpg.io/promote: <site>` pour agir.
-	// À privilégier pour les bases sensibles ou les bascules planifiées.
+	// FailoverModeManual: the operator detects the outage and surfaces the
+	// state, but waits for an `ha.cnpg.io/promote: <site>` annotation before
+	// acting. Pick this for sensitive databases or scheduled switchovers.
 	FailoverModeManual FailoverMode = "Manual"
 )
 
-// PromotionPolicy détermine quel replica devient le nouveau primary.
+// PromotionPolicy decides which replica becomes the new primary.
 //
 // +kubebuilder:validation:Enum=MostAdvancedLSN;Ordered
 type PromotionPolicy string
 
 const (
-	// PromotionPolicyMostAdvancedLSN : choisit le replica dont le LSN PostgreSQL
-	// (Log Sequence Number) est le plus avancé — minimise la perte de données.
+	// PromotionPolicyMostAdvancedLSN: pick the replica whose PostgreSQL LSN
+	// (Log Sequence Number) is furthest ahead — minimises data loss.
 	PromotionPolicyMostAdvancedLSN PromotionPolicy = "MostAdvancedLSN"
 
-	// PromotionPolicyOrdered : suit l'ordre déclaré dans spec.replicas
-	// (utile pour respecter un site préféré, ex. site B avant site C).
+	// PromotionPolicyOrdered: follow the order declared in spec.replicas
+	// (useful to honour a preferred site, e.g. site B before site C).
 	PromotionPolicyOrdered PromotionPolicy = "Ordered"
 )
 
@@ -66,72 +66,74 @@ const (
 type RejoinPolicy string
 
 const (
-	// RejoinPolicyManual : the operator fences the returning primary and
+	// RejoinPolicyManual: the operator fences the returning primary and
 	// raises the SplitBrain condition. Converting it back to a replica is
 	// left to a human (no silent data loss). Safe default.
 	RejoinPolicyManual RejoinPolicy = "Manual"
 
-	// RejoinPolicyAutoReplica : the operator rebuilds the returning primary
+	// RejoinPolicyAutoReplica: the operator rebuilds the returning primary
 	// as a replica of the current primary. This discards any writes the
 	// returning site accepted after the failover (diverged timeline) — fully
 	// automatic but destructive by design.
 	RejoinPolicyAutoReplica RejoinPolicy = "AutoReplica"
 )
 
-// SiteRole indique le rôle observé d'un site lors du dernier Reconcile.
+// SiteRole is the role a site was observed in during the last Reconcile.
 //
 // +kubebuilder:validation:Enum=Primary;Replica;Unknown
 type SiteRole string
 
 const (
-	// SiteRolePrimary : le CR CNPG Cluster du site est en mode primary
-	// (spec.replica absent ou enabled=false).
+	// SiteRolePrimary: the site's CNPG Cluster CR is in primary mode
+	// (spec.replica missing or enabled=false).
 	SiteRolePrimary SiteRole = "Primary"
 
-	// SiteRoleReplica : le CR CNPG Cluster du site est en mode replica
+	// SiteRoleReplica: the site's CNPG Cluster CR is in replica mode
 	// (spec.replica.enabled=true).
 	SiteRoleReplica SiteRole = "Replica"
 
-	// SiteRoleUnknown : le site n'a pas pu être joint ou observé.
-	// Aucune conclusion ne peut être tirée sur son rôle.
+	// SiteRoleUnknown: the site could not be reached or observed. No
+	// conclusion can be drawn about its role.
 	SiteRoleUnknown SiteRole = "Unknown"
 )
 
-// ClusterRef pointe vers un CR CNPG `Cluster` (postgresql.cnpg.io/v1).
+// ClusterRef points to a CNPG `Cluster` CR (postgresql.cnpg.io/v1).
 //
-// Note : on ne référence pas directement le CNPG Cluster en Go (pas d'import
-// croisé pour ne pas alourdir les dépendances). On vérifie son existence au
-// runtime via le client K8s.
+// Note: the CNPG Cluster is not imported as a Go type (to keep the
+// dependency graph light). Its existence is checked at runtime through
+// the Kubernetes client.
 type ClusterRef struct {
-	// Name du CR CNPG Cluster.
+	// Name of the CNPG Cluster CR.
 	//
 	// +required
 	// +kubebuilder:validation:MinLength=1
 	Name string `json:"name"`
 
-	// Namespace du CR CNPG Cluster.
+	// Namespace of the CNPG Cluster CR.
 	//
 	// +required
 	// +kubebuilder:validation:MinLength=1
 	Namespace string `json:"namespace"`
 }
 
-// PrimarySite décrit le site local / bootstrap déclaré au départ. Après une
-// bascule, le primary courant est porté par status.currentPrimarySite.
+// PrimarySite describes the local / bootstrap site declared at install
+// time. After a failover the current primary is carried by
+// status.currentPrimarySite, not by this field.
 type PrimarySite struct {
-	// Name est l'identifiant logique du site local / bootstrap (ex. "site-a").
-	// Cohérent avec ReplicaSite.Name — peut être la valeur initiale de
-	// status.currentPrimarySite et sert de clé dans les métriques. Doit être
-	// unique au sein du HACluster (ne pas réutiliser un nom de replica).
+	// Name is the logical identifier of the local / bootstrap site
+	// (e.g. "site-a"). Same semantics as ReplicaSite.Name — it may be the
+	// initial value of status.currentPrimarySite and is used as a key in
+	// the metrics. Must be unique within the HACluster (do not reuse a
+	// replica name).
 	//
 	// +required
 	// +kubebuilder:validation:MinLength=1
 	// +kubebuilder:validation:Pattern=`^[a-z0-9]([-a-z0-9]*[a-z0-9])?$`
 	Name string `json:"name"`
 
-	// ClusterRef pointe vers le CR CNPG Cluster du site local / bootstrap.
-	// Il sert de primary au démarrage, mais après une bascule le primary
-	// courant peut être l'un des sites de Spec.Replicas.
+	// ClusterRef points to the CNPG Cluster CR for the local / bootstrap
+	// site. It serves as the primary at startup; after a failover the
+	// current primary may be any of the sites listed in Spec.Replicas.
 	//
 	// +required
 	ClusterRef ClusterRef `json:"clusterRef"`
@@ -151,28 +153,29 @@ type PrimarySite struct {
 	ReplicationEndpoint string `json:"replicationEndpoint,omitempty"`
 }
 
-// ReplicaSite décrit un cluster CNPG distant servant de replica.
+// ReplicaSite describes a remote CNPG cluster acting as a replica.
 type ReplicaSite struct {
-	// Name est l'identifiant logique du site (ex. "site-b"). Doit être
-	// stable et unique au sein du HACluster — sert de clé dans le status
-	// et dans les métriques Prometheus.
+	// Name is the logical identifier of the site (e.g. "site-b"). Must be
+	// stable and unique within the HACluster — it is used as a key in the
+	// status and in Prometheus metrics.
 	//
 	// +required
 	// +kubebuilder:validation:MinLength=1
 	// +kubebuilder:validation:Pattern=`^[a-z0-9]([-a-z0-9]*[a-z0-9])?$`
 	Name string `json:"name"`
 
-	// KubeconfigSecretRef pointe vers un Secret du cluster local qui contient
-	// le kubeconfig pour se connecter au cluster distant. L'opérateur lit
-	// le Secret au démarrage et le rafraîchit selon un TTL interne.
+	// KubeconfigSecretRef points to a Secret in the local cluster that
+	// holds the kubeconfig used to connect to the remote cluster. The
+	// operator reads the Secret at startup and refreshes it on an internal
+	// TTL.
 	//
-	// Sécurité : la clé pointée NE DOIT JAMAIS être loggée. Voir
-	// internal/remoteclient pour la logique de redaction.
+	// Security: the key referenced here MUST NEVER be logged. See
+	// internal/remoteclient for the redaction logic.
 	//
 	// +required
 	KubeconfigSecretRef corev1.SecretKeySelector `json:"kubeconfigSecretRef"`
 
-	// ClusterRef pointe vers le CR CNPG Cluster dans le cluster distant.
+	// ClusterRef points to the CNPG Cluster CR inside the remote cluster.
 	//
 	// +required
 	ClusterRef ClusterRef `json:"clusterRef"`
@@ -187,17 +190,17 @@ type ReplicaSite struct {
 	ReplicationEndpoint string `json:"replicationEndpoint,omitempty"`
 }
 
-// FailoverSpec regroupe les paramètres de décision de bascule.
+// FailoverSpec groups the failover decision parameters.
 type FailoverSpec struct {
-	// Mode : Automatic ou Manual. Voir FailoverMode.
+	// Mode: Automatic or Manual. See FailoverMode.
 	//
 	// +kubebuilder:default=Manual
 	// +optional
 	Mode FailoverMode `json:"mode,omitempty"`
 
-	// HealthCheckIntervalSeconds : période entre deux sondes du primary.
-	// 10s est un bon point de départ — trop court = flapping, trop long
-	// = RTO dégradé.
+	// HealthCheckIntervalSeconds: period between two primary probes.
+	// 10 s is a good starting point — too short causes flapping, too long
+	// degrades the RTO.
 	//
 	// +kubebuilder:default=10
 	// +kubebuilder:validation:Minimum=1
@@ -205,9 +208,9 @@ type FailoverSpec struct {
 	// +optional
 	HealthCheckIntervalSeconds int32 `json:"healthCheckIntervalSeconds,omitempty"`
 
-	// FailureThreshold : nombre de sondes consécutives en échec avant de
-	// considérer le primary HS. Toujours > 1 pour éviter qu'un blip réseau
-	// déclenche un failover.
+	// FailureThreshold: number of consecutive failed probes before the
+	// primary is considered down. Always greater than 1 so a transient
+	// network blip cannot trigger a failover.
 	//
 	// +kubebuilder:default=3
 	// +kubebuilder:validation:Minimum=2
@@ -215,7 +218,7 @@ type FailoverSpec struct {
 	// +optional
 	FailureThreshold int32 `json:"failureThreshold,omitempty"`
 
-	// PromotionPolicy : voir PromotionPolicy.
+	// PromotionPolicy: see PromotionPolicy.
 	//
 	// +kubebuilder:default=MostAdvancedLSN
 	// +optional
@@ -229,14 +232,14 @@ type FailoverSpec struct {
 	RejoinPolicy RejoinPolicy `json:"rejoinPolicy,omitempty"`
 }
 
-// HAClusterSpec décrit l'état désiré d'un HACluster.
+// HAClusterSpec describes the desired state of an HACluster.
 type HAClusterSpec struct {
-	// Primary : site qui sert actuellement les écritures.
+	// Primary: site currently serving writes.
 	//
 	// +required
 	Primary PrimarySite `json:"primary"`
 
-	// Replicas : sites distants prêts à être promus.
+	// Replicas: remote sites ready to be promoted.
 	//
 	// +required
 	// +kubebuilder:validation:MinItems=1
@@ -244,88 +247,91 @@ type HAClusterSpec struct {
 	// +listMapKey=name
 	Replicas []ReplicaSite `json:"replicas"`
 
-	// Failover : paramètres de décision de bascule.
+	// Failover: failover decision parameters.
 	//
 	// +optional
 	Failover FailoverSpec `json:"failover,omitempty"`
 }
 
-// SiteStatus expose l'observation d'un site (primary ou replica) lors du
-// dernier Reconcile. Sert à l'inspection rapide via kubectl et de base à
-// la future logique de promotion (qui consulte l'état de chaque candidat).
+// SiteStatus exposes the observation of a site (primary or replica)
+// captured during the last Reconcile. It supports quick inspection via
+// kubectl and is the basis for the promotion logic that consults the
+// state of each candidate.
 type SiteStatus struct {
-	// Name est l'identifiant logique du site, cohérent avec
-	// spec.primary.name ou spec.replicas[].name.
+	// Name is the logical identifier of the site, consistent with
+	// spec.primary.name or spec.replicas[].name.
 	//
 	// +required
 	Name string `json:"name"`
 
-	// Role observé du site lors du dernier Reconcile.
+	// Role observed for the site during the last Reconcile.
 	//
 	// +required
 	Role SiteRole `json:"role"`
 
-	// Reachable indique si l'API K8s du site a répondu au dernier Reconcile.
+	// Reachable indicates whether the site's K8s API responded during the
+	// last Reconcile.
 	Reachable bool `json:"reachable"`
 
-	// Ready indique si le CR CNPG Cluster du site a au moins une instance
-	// ready (status.readyInstances > 0).
+	// Ready indicates whether the site's CNPG Cluster CR has at least one
+	// ready instance (status.readyInstances > 0).
 	Ready bool `json:"ready"`
 
-	// Phase reprend status.phase du CR CNPG Cluster (ex. "Cluster in healthy
-	// state"). Vide si le site est unreachable.
+	// Phase mirrors status.phase of the CNPG Cluster CR (e.g. "Cluster in
+	// healthy state"). Empty if the site is unreachable.
 	//
 	// +optional
 	Phase string `json:"phase,omitempty"`
 
-	// Message porte un détail libre — typiquement la raison d'un échec
-	// (kubeconfig invalide, Get K8s en erreur, readyInstances=0). Vide
-	// quand le site est reachable et ready.
+	// Message carries a free-form detail — typically the reason for a
+	// failure (invalid kubeconfig, K8s Get error, readyInstances=0). Empty
+	// when the site is reachable and ready.
 	//
 	// +optional
 	Message string `json:"message,omitempty"`
 
-	// LastObservedTime est le timestamp du Reconcile qui a produit cette
-	// observation. Mis à jour à chaque passage, même sans changement d'état.
+	// LastObservedTime is the timestamp of the Reconcile that produced
+	// this observation. Updated on every pass, even without a state change.
 	//
 	// +optional
 	LastObservedTime *metav1.Time `json:"lastObservedTime,omitempty"`
 }
 
-// HAClusterStatus décrit l'état observé d'un HACluster.
+// HAClusterStatus describes the observed state of an HACluster.
 type HAClusterStatus struct {
-	// CurrentPrimarySite : nom du dernier site accepté comme primary par
-	// l'opérateur. Lors d'un failover, ce champ est mis à jour APRÈS la
-	// promotion effective côté CNPG (jamais avant). Si ce site devient
-	// temporairement unhealthy, le champ reste renseigné et l'indisponibilité
-	// est exposée via les conditions.
+	// CurrentPrimarySite: name of the last site accepted as primary by the
+	// operator. On a failover, this field is updated AFTER the CNPG-side
+	// promotion has happened (never before). If that site becomes
+	// transiently unhealthy, the field stays set and the unavailability is
+	// surfaced through the conditions.
 	//
 	// +optional
 	CurrentPrimarySite string `json:"currentPrimarySite,omitempty"`
 
-	// LastFailoverTime : timestamp du dernier failover réussi.
+	// LastFailoverTime: timestamp of the last successful failover.
 	//
 	// +optional
 	LastFailoverTime *metav1.Time `json:"lastFailoverTime,omitempty"`
 
-	// ObservedGeneration : metadata.generation prise en compte lors du
-	// dernier Reconcile. Permet de savoir si le status reflète le spec courant.
+	// ObservedGeneration: metadata.generation processed by the last
+	// Reconcile. Tells callers whether the status reflects the current spec.
 	//
 	// +optional
 	ObservedGeneration int64 `json:"observedGeneration,omitempty"`
 
-	// Sites : observation détaillée par site (primary + replicas).
-	// Permet l'inspection rapide via
-	// `kubectl get hacluster -o jsonpath='{.status.sites}'` et sert de
-	// base à la logique de promotion.
+	// Sites: per-site detailed observation (primary + replicas). Enables
+	// quick inspection via
+	// `kubectl get hacluster -o jsonpath='{.status.sites}'` and underpins
+	// the promotion logic.
 	//
 	// +listType=map
 	// +listMapKey=name
 	// +optional
 	Sites []SiteStatus `json:"sites,omitempty"`
 
-	// Conditions : état des aspects fonctionnels du HACluster.
-	// Types attendus : "Available", "Progressing", "Degraded", "FailoverInProgress".
+	// Conditions: state of the functional aspects of the HACluster.
+	// Expected types: "Available", "Progressing", "Degraded",
+	// "FailoverInProgress".
 	//
 	// +listType=map
 	// +listMapKey=type
@@ -341,26 +347,27 @@ type HAClusterStatus struct {
 // +kubebuilder:printcolumn:name="Mode",type=string,JSONPath=`.spec.failover.mode`
 // +kubebuilder:printcolumn:name="Age",type=date,JSONPath=`.metadata.creationTimestamp`
 
-// HACluster orchestre la bascule multi-cluster d'un groupe de Clusters CNPG.
+// HACluster orchestrates the cross-cluster failover of a group of CNPG
+// Clusters.
 type HACluster struct {
 	metav1.TypeMeta `json:",inline"`
 
-	// metadata standard.
+	// Standard metadata.
 	// +optional
 	metav1.ObjectMeta `json:"metadata,omitzero"`
 
-	// spec définit l'état désiré.
+	// Spec defines the desired state.
 	// +required
 	Spec HAClusterSpec `json:"spec"`
 
-	// status reflète l'état observé.
+	// Status reflects the observed state.
 	// +optional
 	Status HAClusterStatus `json:"status,omitzero"`
 }
 
 // +kubebuilder:object:root=true
 
-// HAClusterList contient une liste de HACluster.
+// HAClusterList contains a list of HACluster.
 type HAClusterList struct {
 	metav1.TypeMeta `json:",inline"`
 	metav1.ListMeta `json:"metadata,omitzero"`
