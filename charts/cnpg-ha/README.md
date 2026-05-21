@@ -51,7 +51,7 @@ HACluster instances. To force CRD removal:
 
 ```bash
 helm uninstall <release> -n <ns>
-kubectl delete crd haclusters.ha.ha.cnpg.io   # explicit, irreversible
+kubectl delete crd haclusters.ha.cnpg.io   # explicit, irreversible
 ```
 
 ## Uninstalling

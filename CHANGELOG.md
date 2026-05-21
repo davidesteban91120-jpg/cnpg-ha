@@ -11,7 +11,7 @@ conversion webhook but **must** be listed under `### Breaking` (CONVENTION §2.4
 
 ### Added
 
-- `HACluster` CRD (`ha.ha.cnpg.io/v1alpha1`) — multi-site CNPG orchestration.
+- `HACluster` CRD (`ha.cnpg.io/v1alpha1`) — multi-site CNPG orchestration.
 - Observe-only reconcile: per-site `status.sites[]`, conditions `Available`
   and `Degraded`.
 - Manual failover: annotation `ha.cnpg.io/promote: <site>` honored when

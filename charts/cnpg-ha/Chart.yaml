@@ -25,6 +25,6 @@ annotations:
   artifacthub.io/crds: |
     - kind: HACluster
       version: v1alpha1
-      name: haclusters.ha.ha.cnpg.io
+      name: haclusters.ha.cnpg.io
       displayName: HACluster
       description: Group of geographically distributed CNPG Clusters managed for cross-site failover.

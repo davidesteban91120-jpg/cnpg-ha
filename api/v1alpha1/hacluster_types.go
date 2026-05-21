@@ -14,7 +14,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-// Package v1alpha1 contient les types Go de l'API ha.ha.cnpg.io/v1alpha1.
+// Package v1alpha1 contient les types Go de l'API ha.cnpg.io/v1alpha1.
 //
 // Note Go pour nouveau venu : un package = un dossier. Tous les fichiers
 // .go ici doivent déclarer `package v1alpha1`. Le suffixe v1alpha1 signale

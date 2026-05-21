@@ -172,7 +172,7 @@ Reconcile(HACluster) [cible]
 
 ```yaml
 # ClusterRole minimal — généré par les markers +kubebuilder:rbac dans le controller
-- apiGroups: ["ha.ha.cnpg.io"]
+- apiGroups: ["ha.cnpg.io"]
   resources: ["haclusters", "haclusters/status", "haclusters/finalizers"]
   verbs: ["get", "list", "watch", "update", "patch"]
 

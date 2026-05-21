@@ -1,4 +1,4 @@
-apiVersion: ha.ha.cnpg.io/v1alpha1
+apiVersion: ha.cnpg.io/v1alpha1
 kind: HACluster
 metadata:
   name: prod-db

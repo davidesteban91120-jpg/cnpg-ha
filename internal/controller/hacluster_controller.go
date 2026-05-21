@@ -131,9 +131,9 @@ func siteObsFromHealth(name string, h health.SiteHealth) siteObservation {
 	}
 }
 
-// +kubebuilder:rbac:groups=ha.ha.cnpg.io,resources=haclusters,verbs=get;list;watch;create;update;patch;delete
-// +kubebuilder:rbac:groups=ha.ha.cnpg.io,resources=haclusters/status,verbs=get;update;patch
-// +kubebuilder:rbac:groups=ha.ha.cnpg.io,resources=haclusters/finalizers,verbs=update
+// +kubebuilder:rbac:groups=ha.cnpg.io,resources=haclusters,verbs=get;list;watch;create;update;patch;delete
+// +kubebuilder:rbac:groups=ha.cnpg.io,resources=haclusters/status,verbs=get;update;patch
+// +kubebuilder:rbac:groups=ha.cnpg.io,resources=haclusters/finalizers,verbs=update
 // +kubebuilder:rbac:groups="",resources=secrets,verbs=get;list;watch
 // +kubebuilder:rbac:groups="",resources=services,verbs=get;list;watch;update;patch
 // +kubebuilder:rbac:groups="",resources=events,verbs=create;patch

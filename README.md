@@ -115,7 +115,7 @@ Step-by-step setup and alternatives → [`docs/ONBOARDING.md`](docs/ONBOARDING.m
 
 | Area | State |
 |---|---|
-| API `ha.ha.cnpg.io/v1alpha1` | **Alpha** — breaking changes allowed, announced under `### Breaking` in [`CHANGELOG.md`](CHANGELOG.md) |
+| API `ha.cnpg.io/v1alpha1` | **Alpha** — breaking changes allowed, announced under `### Breaking` in [`CHANGELOG.md`](CHANGELOG.md) |
 | Manual + automatic failover, anti-flapping, split-brain detection | ✅ Validated via envtest + 3-site KinD |
 | Cilium Cluster Mesh integration | ✅ Validated end-to-end (3 KinD + mesh) |
 | Topology reconfiguration + rejoin policy (`Manual`, `AutoReplica`) | ✅ Validated via envtest + KinD |

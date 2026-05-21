@@ -4,9 +4,9 @@ kind: CustomResourceDefinition
 metadata:
   annotations:
     controller-gen.kubebuilder.io/version: v0.20.1
-  name: haclusters.ha.ha.cnpg.io
+  name: haclusters.ha.cnpg.io
 spec:
-  group: ha.ha.cnpg.io
+  group: ha.cnpg.io
   names:
     kind: HACluster
     listKind: HAClusterList

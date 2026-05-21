@@ -30,7 +30,7 @@ rules:
   - update
   - watch
 - apiGroups:
-  - ha.ha.cnpg.io
+  - ha.cnpg.io
   resources:
   - haclusters
   verbs:
@@ -42,13 +42,13 @@ rules:
   - update
   - watch
 - apiGroups:
-  - ha.ha.cnpg.io
+  - ha.cnpg.io
   resources:
   - haclusters/finalizers
   verbs:
   - update
 - apiGroups:
-  - ha.ha.cnpg.io
+  - ha.cnpg.io
   resources:
   - haclusters/status
   verbs:

@@ -101,7 +101,7 @@ kubectl apply --server-side -f \
 ### 5.3 Installer notre CRD
 
 ```bash
-make install   # applique config/crd/bases/ha.ha.cnpg.io_haclusters.yaml
+make install   # applique config/crd/bases/ha.cnpg.io_haclusters.yaml
 ```
 
 ### 5.4 Lancer l'opérateur localement
@@ -291,7 +291,7 @@ Pour confirmer que les `+kubebuilder:validation:*` markers font leur job, essaie
 ```bash
 # Replicas vide → doit échouer (MinItems=1)
 cat <<'EOF' | kubectl apply -f -
-apiVersion: ha.ha.cnpg.io/v1alpha1
+apiVersion: ha.cnpg.io/v1alpha1
 kind: HACluster
 metadata: { name: bad-empty-replicas, namespace: db }
 spec:
@@ -303,7 +303,7 @@ EOF
 
 # Mode invalide → doit échouer (Enum)
 cat <<'EOF' | kubectl apply -f -
-apiVersion: ha.ha.cnpg.io/v1alpha1
+apiVersion: ha.cnpg.io/v1alpha1
 kind: HACluster
 metadata: { name: bad-mode, namespace: db }
 spec:
@@ -318,7 +318,7 @@ EOF
 
 # failureThreshold trop bas → doit échouer (Minimum=2)
 cat <<'EOF' | kubectl apply -f -
-apiVersion: ha.ha.cnpg.io/v1alpha1
+apiVersion: ha.cnpg.io/v1alpha1
 kind: HACluster
 metadata: { name: bad-threshold, namespace: db }
 spec:

@@ -16,7 +16,7 @@ limitations under the License.
 
 // Package v1alpha1 contains API Schema definitions for the ha v1alpha1 API group.
 // +kubebuilder:object:generate=true
-// +groupName=ha.ha.cnpg.io
+// +groupName=ha.cnpg.io
 package v1alpha1
 
 import (
@@ -27,7 +27,7 @@ import (
 var (
 	// SchemeGroupVersion is group version used to register these objects.
 	// This name is used by applyconfiguration generators (e.g. controller-gen).
-	SchemeGroupVersion = schema.GroupVersion{Group: "ha.ha.cnpg.io", Version: "v1alpha1"}
+	SchemeGroupVersion = schema.GroupVersion{Group: "ha.cnpg.io", Version: "v1alpha1"}
 
 	// GroupVersion is an alias for SchemeGroupVersion, for backward compatibility.
 	GroupVersion = SchemeGroupVersion
