@@ -402,6 +402,28 @@ re-point replication correctly but CNPG streaming will stay broken until the
 prerequisite is met — surfaced as a non-ready replica in `status.sites[]`
 (and, transitively, the `Degraded` condition), not as an operator error.
 
+### 9.7 Per-site addressable endpoints (required for operator-driven failover)
+
+Each site's `ReplicationEndpoint` (and the matching client-side global
+Service) **must individually address that site's primary** — e.g. one
+`pg-<site>-rw` global Service per site (`service.cilium.io/global` +
+`affinity: local` on the owning cluster, a selector-less `affinity: remote`
+mirror elsewhere). Replicas stream from the *current primary site's*
+endpoint; on failover the operator re-points a surviving replica's
+`externalClusters[].connectionParameters.host` to the **new** primary's
+endpoint.
+
+A single shared global name for all sites looks simpler but **breaks
+operator-driven failover**: the re-point becomes a no-op (the host string
+is unchanged), so CNPG never restarts the standby's WAL receiver and the
+survivor stays pinned to the dead primary's timeline — even though the mesh
+datapath itself reconverges. Distinct per-site names make the operator's
+`promotion.Reconfigure` an actual CNPG spec change, which restarts the
+standby; with no local divergence it then follows the promoted primary's
+new timeline. Validated end-to-end by `hack/e2e/clustermesh/40-failover.sh`
+(promotion, DR fence/flip skip, Cilium affinity flip, survivor re-point +
+timeline follow, no data loss).
+
 ---
 
 ## 10. Implementation roadmap
