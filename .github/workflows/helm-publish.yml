@@ -57,6 +57,17 @@ jobs:
           echo "${{ secrets.GITHUB_TOKEN }}" | \
             helm registry login -u "${{ github.actor }}" --password-stdin "$REGISTRY"
 
+      # Cosign reads credentials from ~/.docker/config.json, NOT from the
+      # Helm registry login above (which writes to ~/.config/helm/...).
+      # Without this step, `cosign sign` fails on the post-push GET with
+      # "UNAUTHORIZED: authentication required".
+      - name: Log in to ghcr.io (Docker config, for cosign)
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
       - name: Package chart
         run: |
           mkdir -p dist
