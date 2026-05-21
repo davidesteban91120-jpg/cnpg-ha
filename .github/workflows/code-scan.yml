@@ -83,14 +83,19 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Run osv-scanner
+        # --call-analysis=none disables the embedded govulncheck pass.
+        # osv-scanner v2.0.0 ships Go 1.23 in its container; with our go.mod
+        # toolchain directive at 1.25+ the call-analysis pass crashes
+        # (GOTOOLCHAIN=local). We run govulncheck in a dedicated job above
+        # with the right Go version, so this duplication is unnecessary.
         uses: google/osv-scanner-action/osv-scanner-action@v2.0.0
         with:
           scan-args: |-
             --recursive
+            --call-analysis=none
             --format=sarif
             --output=osv.sarif
             ./
-        continue-on-error: true
       - name: Upload osv-scanner SARIF
         if: ${{ always() && !github.event.repository.private }}
         uses: github/codeql-action/upload-sarif@v3
