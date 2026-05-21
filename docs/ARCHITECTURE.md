@@ -238,8 +238,8 @@ The user / service account carried by the kubeconfig must hold **as few rights a
 | `cnpg_ha_current_primary_site` | Gauge | `hacluster`, `namespace`, `site` | 1 if the site is primary, 0 otherwise |
 | `cnpg_ha_site_reachable` | Gauge | `hacluster`, `namespace`, `site` | 1 if the remote cluster responds |
 | `cnpg_ha_replica_lag_seconds` | Gauge | `hacluster`, `namespace`, `site` | Observed replication lag |
-| `cnpg_ha_failover_total` | Counter | `hacluster`, `namespace`, `reason` | Number of failovers performed |
-| `cnpg_ha_failover_duration_seconds` | Histogram | `hacluster`, `namespace` | Promotion duration |
+| `cnpg_ha_failover_total` | Counter | `hacluster`, `namespace`, `mode` | Number of failovers performed |
+| `cnpg_ha_failover_duration_seconds` | Histogram | `hacluster`, `namespace`, `mode` | Successful promotion duration |
 | `cnpg_ha_reconcile_errors_total` | Counter | `controller` | Errors on the operator side itself |
 
 Standard controller-runtime counters (`controller_runtime_reconcile_total`, …) are already exposed for free — do not duplicate them.
@@ -441,7 +441,7 @@ timeline follow, no data loss).
 9. ✅ Cross-site CA prerequisite documented ([§9.6](#96-cross-site-ca-prerequisite-streaming-replication-trust)).
 10. ✅ `Automatic` mode: in-RAM failure counter (mutex), `failureThreshold`, fires without annotation, requeue at the `healthCheckIntervalSeconds` cadence, split-brain guard. Validated end-to-end on KinD.
 11. ✅ Rejoin safety fix: `reconcileReplicaTopology` now reclassifies each site through an **authoritative re-read** of the CNPG CR (not the status-mutated observation buffer) — a just-demoted old primary is no longer silently rebuilt as a replica, bypassing `rejoinPolicy=Manual`. Regression guard `TestAutomaticFailover_OldPrimaryFencedNotReconfigured`.
-12. ✅ Prometheus metrics: `internal/metrics` (`cnpg_ha_current_primary_site`, `_site_reachable`, `_site_ready`, `_split_brain`, `cnpg_ha_failover_total{mode}`), registered in the controller-runtime registry. `replica_lag_seconds` not exposed (see §10.2 — CNPG does not expose the lag).
+12. ✅ Prometheus metrics: `internal/metrics` (`cnpg_ha_current_primary_site`, `_site_reachable`, `_site_ready`, `_split_brain`, `cnpg_ha_failover_total{mode}`, `cnpg_ha_failover_duration_seconds{mode}`), registered in the controller-runtime registry. `replica_lag_seconds` not exposed (see §10.2 — CNPG does not expose the lag).
 13. ✅ `internal/health` extracted: `Probe` + `SiteHealth` (pure, testable), `parseCluster`; the controller no longer holds inline observation logic. Exposes `timelineID` as a progress proxy.
 14. ✅ `promotionPolicy` applied in `chooseTarget`: `Ordered` (spec order) and `MostAdvancedLSN` (highest timeline, tie-break on spec order — timeline proxy, not a true LSN).
 15. ✅ `CHANGELOG.md` (Keep a Changelog format): `[Unreleased]` section covering additions, fixes, CRD schema changes (`replicationEndpoint`, `rejoinPolicy`) and known limitations.

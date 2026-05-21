@@ -28,7 +28,7 @@ Background reading on the *why* (CNPG primitives, replica cluster mechanics, RTO
 - **Topology reconfiguration** — Surviving replicas are re-pointed at the new primary; a returning old primary is either fenced (`rejoinPolicy: Manual`) or rebuilt as a replica (`AutoReplica`).
 - **Cilium Cluster Mesh integration** — Flips `service.cilium.io/global` and `service.cilium.io/affinity` on the `*-rw` Services as part of the promotion sequence, so client traffic follows the new writer across clusters.
 - **Split-brain detection** — Sets `SplitBrain=True` when more than one site is observed as CNPG-primary + ready, and guards the promotion path against it.
-- **Prometheus metrics** — `cnpg_ha_current_primary_site`, `_site_reachable`, `_site_ready`, `_split_brain`, `cnpg_ha_failover_total{mode}` exposed on the manager metrics endpoint.
+- **Prometheus metrics** — `cnpg_ha_current_primary_site`, `_site_reachable`, `_site_ready`, `_split_brain`, `cnpg_ha_failover_total{mode}`, `cnpg_ha_failover_duration_seconds{mode}` exposed on the manager metrics endpoint.
 - **SLSA L3 supply chain** — Image is Cosign-signed (keyless), ships with an SPDX-JSON SBOM attestation and an `slsa-github-generator` provenance attestation. CVE scans (govulncheck, gosec, osv-scanner, trivy fs, trivy image, gitleaks) run on every PR. See [`docs/SUPPLY_CHAIN.md`](docs/SUPPLY_CHAIN.md).
 
 ### What it does *not* do (by design)

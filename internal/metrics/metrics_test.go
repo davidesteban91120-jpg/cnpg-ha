@@ -67,3 +67,31 @@ cnpg_ha_failover_total{hacluster="prod-db",mode="manual",namespace="db"} 1
 		t.Errorf("failover_total mismatch:\n%v", err)
 	}
 }
+
+func TestObserveFailoverDuration(t *testing.T) {
+	FailoverDurationSeconds.Reset()
+	ObserveFailoverDuration("db", "prod-db", "automatic", 0.2)
+	ObserveFailoverDuration("db", "prod-db", "automatic", 1.1)
+
+	const want = `
+# HELP cnpg_ha_failover_duration_seconds Duration in seconds of successful failover promotion sequences.
+# TYPE cnpg_ha_failover_duration_seconds histogram
+cnpg_ha_failover_duration_seconds_bucket{hacluster="prod-db",mode="automatic",namespace="db",le="0.005"} 0
+cnpg_ha_failover_duration_seconds_bucket{hacluster="prod-db",mode="automatic",namespace="db",le="0.01"} 0
+cnpg_ha_failover_duration_seconds_bucket{hacluster="prod-db",mode="automatic",namespace="db",le="0.025"} 0
+cnpg_ha_failover_duration_seconds_bucket{hacluster="prod-db",mode="automatic",namespace="db",le="0.05"} 0
+cnpg_ha_failover_duration_seconds_bucket{hacluster="prod-db",mode="automatic",namespace="db",le="0.1"} 0
+cnpg_ha_failover_duration_seconds_bucket{hacluster="prod-db",mode="automatic",namespace="db",le="0.25"} 1
+cnpg_ha_failover_duration_seconds_bucket{hacluster="prod-db",mode="automatic",namespace="db",le="0.5"} 1
+cnpg_ha_failover_duration_seconds_bucket{hacluster="prod-db",mode="automatic",namespace="db",le="1"} 1
+cnpg_ha_failover_duration_seconds_bucket{hacluster="prod-db",mode="automatic",namespace="db",le="2.5"} 2
+cnpg_ha_failover_duration_seconds_bucket{hacluster="prod-db",mode="automatic",namespace="db",le="5"} 2
+cnpg_ha_failover_duration_seconds_bucket{hacluster="prod-db",mode="automatic",namespace="db",le="10"} 2
+cnpg_ha_failover_duration_seconds_bucket{hacluster="prod-db",mode="automatic",namespace="db",le="+Inf"} 2
+cnpg_ha_failover_duration_seconds_sum{hacluster="prod-db",mode="automatic",namespace="db"} 1.3
+cnpg_ha_failover_duration_seconds_count{hacluster="prod-db",mode="automatic",namespace="db"} 2
+`
+	if err := testutil.CollectAndCompare(FailoverDurationSeconds, strings.NewReader(want)); err != nil {
+		t.Errorf("failover_duration_seconds mismatch:\n%v", err)
+	}
+}

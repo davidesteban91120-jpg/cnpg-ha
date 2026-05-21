@@ -60,6 +60,14 @@ var (
 		Name: subsystem + "_failover_total",
 		Help: "Number of completed failovers, by trigger mode.",
 	}, []string{"hacluster", "namespace", "mode"})
+
+	// FailoverDurationSeconds measures successful promotion duration, labelled
+	// by trigger mode ("manual" or "automatic").
+	FailoverDurationSeconds = prometheus.NewHistogramVec(prometheus.HistogramOpts{
+		Name:    subsystem + "_failover_duration_seconds",
+		Help:    "Duration in seconds of successful failover promotion sequences.",
+		Buckets: prometheus.DefBuckets,
+	}, []string{"hacluster", "namespace", "mode"})
 )
 
 // MustRegister registers every cnpg-ha collector into controller-runtime's
@@ -73,6 +81,7 @@ func MustRegister() {
 		SiteReady,
 		SplitBrain,
 		FailoverTotal,
+		FailoverDurationSeconds,
 	)
 }
 
@@ -99,4 +108,10 @@ func SetSplitBrain(haNamespace, haName string, splitBrain bool) {
 // IncFailover records a completed failover. mode is "manual" or "automatic".
 func IncFailover(haNamespace, haName, mode string) {
 	FailoverTotal.WithLabelValues(haName, haNamespace, mode).Inc()
+}
+
+// ObserveFailoverDuration records the duration of a successful failover.
+// mode is "manual" or "automatic".
+func ObserveFailoverDuration(haNamespace, haName, mode string, seconds float64) {
+	FailoverDurationSeconds.WithLabelValues(haName, haNamespace, mode).Observe(seconds)
 }

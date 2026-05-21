@@ -157,26 +157,31 @@ func (r *HAClusterReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 	// transient split-brain where decideCurrentPrimary can't pick one).
 	priorPrimary := ha.Status.CurrentPrimarySite
 
-	// 1. Observer le primary (client local).
+	// 1. Observe the primary (local client).
 	primaryObs := r.observePrimary(ctx, &ha)
 
-	// 2. Observer chaque replica (client distant via kubeconfig Secret).
+	// 2. Observe each replica (remote client via the kubeconfig Secret).
 	replicaObs := make([]siteObservation, 0, len(ha.Spec.Replicas))
 	for _, rep := range ha.Spec.Replicas {
 		replicaObs = append(replicaObs, r.observeReplica(ctx, &ha, rep))
 	}
 
 	// 3. Honor a manual promotion request, if any (mode=Manual only).
-	promoteErr := r.handlePromoteAnnotation(ctx, &ha, &primaryObs, replicaObs)
+	// Local name avoids shadowing the `promotion` package imported above.
+	promoEffect, promoteErr := r.handlePromoteAnnotation(ctx, &ha, primaryObs, replicaObs)
 
 	// 3bis. Automatic failover (mode=Automatic only): if the current primary
 	// has been unhealthy for failureThreshold consecutive reconciles, promote
 	// a replica without any annotation.
 	if promoteErr == nil {
-		if err := r.handleAutomaticFailover(ctx, &ha, &primaryObs, replicaObs); err != nil {
+		autoEffect, err := r.handleAutomaticFailover(ctx, &ha, primaryObs, replicaObs)
+		if err != nil {
 			promoteErr = err
+		} else if autoEffect.didPromote() {
+			promoEffect = autoEffect
 		}
 	}
+	applyPromotionEffect(promoEffect, &primaryObs, replicaObs)
 
 	// 4. Decide the current primary from the post-promotion observations.
 	currentPrimary, available := decideCurrentPrimary(primaryObs, replicaObs)
@@ -237,24 +242,25 @@ func (r *HAClusterReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 //   - acts only after a sustained failure (threshold), not a transient blip;
 //   - aborts cleanly when no healthy replica candidate exists.
 //
-// On success it mutates primaryObs/replicaObs so the same Reconcile reports
-// the post-failover topology, mirroring handlePromoteAnnotation.
+// Observation buffers are read-only here. On success the function returns a
+// non-zero promotionEffect that the caller (Reconcile) applies via
+// applyPromotionEffect so the rest of the loop sees the new primary.
 func (r *HAClusterReconciler) handleAutomaticFailover(
 	ctx context.Context,
 	ha *hav1alpha1.HACluster,
-	primaryObs *siteObservation,
+	primaryObs siteObservation,
 	replicaObs []siteObservation,
-) error {
+) (promotionEffect, error) {
 	log := logf.FromContext(ctx)
 	key := types.NamespacedName{Namespace: ha.Namespace, Name: ha.Name}
 
 	if ha.Spec.Failover.Mode != hav1alpha1.FailoverModeAutomatic {
-		return nil
+		return promotionEffect{}, nil
 	}
-	if sb := detectSplitBrain(*primaryObs, replicaObs); len(sb) > 0 {
+	if sb := detectSplitBrain(primaryObs, replicaObs); len(sb) > 0 {
 		log.Info("split-brain observed, automatic failover suspended", "sites", sb)
 		r.resetFailCount(key)
-		return nil
+		return promotionEffect{}, nil
 	}
 
 	// Post-failover stabilization. A just-promoted primary briefly reports
@@ -269,7 +275,7 @@ func (r *HAClusterReconciler) handleAutomaticFailover(
 			log.Info("post-failover stabilization, automatic failover suspended",
 				"sinceFailover", since.Truncate(time.Second), "cooldown", cooldown)
 			r.resetFailCount(key)
-			return nil
+			return promotionEffect{}, nil
 		}
 	}
 
@@ -277,11 +283,11 @@ func (r *HAClusterReconciler) handleAutomaticFailover(
 	if curName == "" {
 		curName = ha.Spec.Primary.Name
 	}
-	cur := findObservation(curName, *primaryObs, replicaObs)
+	cur := findObservation(curName, primaryObs, replicaObs)
 	healthy := cur != nil && cur.reachable && cur.primary && cur.ready
 	if healthy {
 		r.resetFailCount(key)
-		return nil
+		return promotionEffect{}, nil
 	}
 
 	threshold := effectiveFailureThreshold(ha.Spec.Failover)
@@ -290,27 +296,29 @@ func (r *HAClusterReconciler) handleAutomaticFailover(
 		msg := fmt.Sprintf("primary %q unhealthy (%d/%d) — automatic failover pending", curName, n, threshold)
 		log.Info(msg)
 		r.event(ha, corev1.EventTypeWarning, eventReasonPrimaryUnhealthy, msg)
-		return nil
+		return promotionEffect{}, nil
 	}
 
-	target, idx, ok := chooseTarget(ha, replicaObs, curName)
+	target, _, ok := chooseTarget(ha, replicaObs, curName)
 	if !ok {
 		msg := fmt.Sprintf("primary %q down but no healthy replica to promote — staying unavailable", curName)
 		log.Info(msg)
 		r.event(ha, corev1.EventTypeWarning, eventReasonAutoFailoverNoCandidate, msg)
-		return nil
+		return promotionEffect{}, nil
 	}
 
 	r.event(ha, corev1.EventTypeNormal, eventReasonFailoverStarted,
 		fmt.Sprintf("promoting site %q to primary (automatic, primary %q unhealthy %d/%d)", target.Name, curName, n, threshold))
 	r.setFailoverInProgress(ha, true, target.Name)
 
+	start := time.Now()
 	if err := r.runPromotion(ctx, ha, curName, target); err != nil {
 		r.event(ha, corev1.EventTypeWarning, eventReasonFailoverFailed,
 			fmt.Sprintf("automatic promotion of %q failed: %v", target.Name, err))
 		r.setFailoverInProgress(ha, false, "")
-		return fmt.Errorf("automatic failover to %q: %w", target.Name, err)
+		return promotionEffect{}, fmt.Errorf("automatic failover to %q: %w", target.Name, err)
 	}
+	hametrics.ObserveFailoverDuration(ha.Namespace, ha.Name, "automatic", time.Since(start).Seconds())
 
 	ha.Status.CurrentPrimarySite = target.Name
 	now := metav1.Now()
@@ -321,10 +329,7 @@ func (r *HAClusterReconciler) handleAutomaticFailover(
 	hametrics.IncFailover(ha.Namespace, ha.Name, "automatic")
 	r.resetFailCount(key)
 
-	markObservationDemoted(curName, primaryObs, replicaObs)
-	markObservationPromoted(replicaObs[idx].name, primaryObs, replicaObs)
-
-	return nil
+	return promotionEffect{demoted: curName, promoted: target.Name}, nil
 }
 
 // chooseTarget selects the replica to promote during an automatic failover,
@@ -511,27 +516,27 @@ func (r *HAClusterReconciler) siteClientAndRef(
 // completed successfully. Returns an error to trigger a requeue when the
 // promotion is in progress or has failed mid-way.
 //
-// The function mutates primaryObs and replicaObs to keep observations in
-// sync with the post-failover reality so the same Reconcile reports the
-// correct status.
+// On success the function returns a non-zero promotionEffect that the caller
+// applies to keep observations in sync with the post-failover reality so the
+// same Reconcile reports the correct status.
 func (r *HAClusterReconciler) handlePromoteAnnotation(
 	ctx context.Context,
 	ha *hav1alpha1.HACluster,
-	primaryObs *siteObservation,
+	primaryObs siteObservation,
 	replicaObs []siteObservation,
-) error {
+) (promotionEffect, error) {
 	log := logf.FromContext(ctx)
 
 	target, ok := ha.Annotations[annotationPromote]
 	if !ok {
-		return nil
+		return promotionEffect{}, nil
 	}
 
 	if ha.Spec.Failover.Mode != hav1alpha1.FailoverModeManual {
 		msg := fmt.Sprintf("annotation %s rejected: spec.failover.mode is %q, must be Manual", annotationPromote, ha.Spec.Failover.Mode)
 		log.Info(msg)
 		r.event(ha, corev1.EventTypeWarning, eventReasonPromoteRejected, msg)
-		return r.clearPromoteAnnotation(ctx, ha)
+		return promotionEffect{}, r.clearPromoteAnnotation(ctx, ha)
 	}
 
 	rep, replicaIdx, found := findReplica(ha, target)
@@ -539,7 +544,7 @@ func (r *HAClusterReconciler) handlePromoteAnnotation(
 		msg := fmt.Sprintf("annotation %s=%q rejected: no replica with that name", annotationPromote, target)
 		log.Info(msg)
 		r.event(ha, corev1.EventTypeWarning, eventReasonPromoteRejected, msg)
-		return r.clearPromoteAnnotation(ctx, ha)
+		return promotionEffect{}, r.clearPromoteAnnotation(ctx, ha)
 	}
 
 	targetObs := replicaObs[replicaIdx]
@@ -548,30 +553,32 @@ func (r *HAClusterReconciler) handlePromoteAnnotation(
 			annotationPromote, target, targetObs.reachable, targetObs.ready, targetObs.primary, targetObs.reason)
 		log.Info(msg)
 		r.event(ha, corev1.EventTypeWarning, eventReasonPromoteRejected, msg)
-		return r.clearPromoteAnnotation(ctx, ha)
+		return promotionEffect{}, r.clearPromoteAnnotation(ctx, ha)
 	}
 
-	oldPrimaryName, err := currentPrimaryForPromotion(ha, *primaryObs, replicaObs)
+	oldPrimaryName, err := currentPrimaryForPromotion(ha, primaryObs, replicaObs)
 	if err != nil {
 		msg := fmt.Sprintf("annotation %s=%q rejected: %v", annotationPromote, target, err)
 		log.Info(msg)
 		r.event(ha, corev1.EventTypeWarning, eventReasonPromoteRejected, msg)
-		return r.clearPromoteAnnotation(ctx, ha)
+		return promotionEffect{}, r.clearPromoteAnnotation(ctx, ha)
 	}
 
 	r.event(ha, corev1.EventTypeNormal, eventReasonFailoverStarted,
 		fmt.Sprintf("promoting site %q to primary (manual)", target))
 	r.setFailoverInProgress(ha, true, target)
 
+	start := time.Now()
 	if err := r.runPromotion(ctx, ha, oldPrimaryName, rep); err != nil {
 		r.event(ha, corev1.EventTypeWarning, eventReasonFailoverFailed,
 			fmt.Sprintf("promotion of %q failed: %v", target, err))
 		r.setFailoverInProgress(ha, false, "")
-		return fmt.Errorf("manual promotion to %q: %w", target, err)
+		return promotionEffect{}, fmt.Errorf("manual promotion to %q: %w", target, err)
 	}
+	hametrics.ObserveFailoverDuration(ha.Namespace, ha.Name, "manual", time.Since(start).Seconds())
 
 	if err := r.clearPromoteAnnotation(ctx, ha); err != nil {
-		return fmt.Errorf("clear promote annotation: %w", err)
+		return promotionEffect{}, fmt.Errorf("clear promote annotation: %w", err)
 	}
 
 	ha.Status.CurrentPrimarySite = target
@@ -582,12 +589,7 @@ func (r *HAClusterReconciler) handlePromoteAnnotation(
 		fmt.Sprintf("site %q is now primary", target))
 	hametrics.IncFailover(ha.Namespace, ha.Name, "manual")
 
-	// Reflect the new reality in the local observation buffers so the
-	// status update in Reconcile shows the correct roles immediately.
-	markObservationDemoted(oldPrimaryName, primaryObs, replicaObs)
-	markObservationPromoted(replicaObs[replicaIdx].name, primaryObs, replicaObs)
-
-	return nil
+	return promotionEffect{demoted: oldPrimaryName, promoted: replicaObs[replicaIdx].name}, nil
 }
 
 // currentPrimaryForPromotion returns the site to demote before a manual
@@ -612,29 +614,57 @@ func currentPrimaryForPromotion(
 	return ha.Spec.Primary.Name, nil
 }
 
-func markObservationDemoted(siteName string, primaryObs *siteObservation, replicaObs []siteObservation) {
-	if primaryObs.name == siteName {
-		primaryObs.primary = false
-		primaryObs.ready = false
-		return
-	}
-	for i := range replicaObs {
-		if replicaObs[i].name == siteName {
-			replicaObs[i].primary = false
-			replicaObs[i].ready = false
-			return
-		}
-	}
+// promotionEffect describes the role change a successful promotion has
+// applied. Returned by handlePromoteAnnotation / handleAutomaticFailover so
+// the caller — Reconcile — can update the in-memory observation buffers in
+// one place, rather than each handler silently mutating its inputs.
+//
+// The zero value (both fields empty) means "no promotion happened this
+// reconcile", and applyPromotionEffect is a no-op for it.
+type promotionEffect struct {
+	demoted  string // name of the site that lost its primary role
+	promoted string // name of the site that gained the primary role
 }
 
-func markObservationPromoted(siteName string, primaryObs *siteObservation, replicaObs []siteObservation) {
+// didPromote reports whether the effect represents an actual role change.
+func (e promotionEffect) didPromote() bool { return e.promoted != "" }
+
+// applyPromotionEffect mirrors the post-promotion topology in the in-memory
+// observation buffers so the rest of the Reconcile (decideCurrentPrimary,
+// detectSplitBrain, buildSiteStatuses, setConditions, publishMetrics) sees
+// the new primary immediately, without waiting for the next observation
+// pass.
+//
+// Important: reconcileReplicaTopology deliberately re-Probes the API
+// server and does NOT trust these mutated observations. A just-demoted old
+// primary still has spec.replica.enabled=false on the API server and only
+// a fresh read tells us so — trusting the mutated buffer would silently
+// rebuild it as a replica, bypassing rejoinPolicy=Manual. See the comment
+// in reconcileReplicaTopology for the data-safety reasoning.
+func applyPromotionEffect(e promotionEffect, primaryObs *siteObservation, replicaObs []siteObservation) {
+	if !e.didPromote() {
+		return
+	}
+	setObservationRole(e.demoted, false, primaryObs, replicaObs)
+	setObservationRole(e.promoted, true, primaryObs, replicaObs)
+}
+
+// setObservationRole flips the .primary (and .ready, when demoting) of the
+// site identified by name. Internal helper of applyPromotionEffect.
+func setObservationRole(siteName string, primary bool, primaryObs *siteObservation, replicaObs []siteObservation) {
+	set := func(o *siteObservation) {
+		o.primary = primary
+		if !primary {
+			o.ready = false
+		}
+	}
 	if primaryObs.name == siteName {
-		primaryObs.primary = true
+		set(primaryObs)
 		return
 	}
 	for i := range replicaObs {
 		if replicaObs[i].name == siteName {
-			replicaObs[i].primary = true
+			set(&replicaObs[i])
 			return
 		}
 	}
@@ -736,8 +766,13 @@ func (r *HAClusterReconciler) setFailoverInProgress(ha *hav1alpha1.HACluster, in
 	}
 	if inProgress {
 		cond.Status = metav1.ConditionTrue
-		cond.Reason = "ManualPromotion"
-		cond.Message = fmt.Sprintf("promoting site %q (manual)", target)
+		if ha.Spec.Failover.Mode == hav1alpha1.FailoverModeAutomatic {
+			cond.Reason = "AutomaticPromotion"
+			cond.Message = fmt.Sprintf("promoting site %q (automatic)", target)
+		} else {
+			cond.Reason = "ManualPromotion"
+			cond.Message = fmt.Sprintf("promoting site %q (manual)", target)
+		}
 	} else {
 		cond.Status = metav1.ConditionFalse
 		cond.Reason = "Idle"
