@@ -191,5 +191,12 @@ jobs:
       image: ${{ needs.build.outputs.image }}
       digest: ${{ needs.build.outputs.digest }}
       registry-username: ${{ github.actor }}
+      # Opt-in for private repositories. Without this the generator refuses
+      # to download its signed builder binary (`slsa-generator-container-
+      # linux-amd64`) and the "final" status step exits 27. Note that the
+      # provenance attestation will still be logged to the public Rekor
+      # transparency log together with the repository name and workflow
+      # path — this flag is the explicit acknowledgement of that.
+      private-repository: true
     secrets:
       registry-password: ${{ secrets.GITHUB_TOKEN }}
