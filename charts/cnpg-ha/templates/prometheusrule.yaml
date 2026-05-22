@@ -1,0 +1,93 @@
+{{- if and .Values.metrics.enabled .Values.metrics.prometheusRule.enabled -}}
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: {{ include "cnpg-ha.fullname" . }}
+  namespace: {{ default .Release.Namespace .Values.metrics.prometheusRule.namespace }}
+  labels:
+    {{- include "cnpg-ha.labels" . | nindent 4 }}
+    {{- with .Values.metrics.prometheusRule.additionalLabels }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+spec:
+  groups:
+    - name: cnpg-ha.rules
+      interval: {{ .Values.metrics.prometheusRule.interval }}
+      rules:
+        - alert: CNPGHASplitBrain
+          expr: max by (namespace, hacluster) (cnpg_ha_split_brain) > 0
+          for: {{ .Values.metrics.prometheusRule.splitBrainFor }}
+          labels:
+            severity: critical
+            {{- with .Values.metrics.prometheusRule.ruleLabels }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+          annotations:
+            summary: "CNPG HA split brain detected"
+            description: "HACluster {{`{{ $labels.namespace }}`}}/{{`{{ $labels.hacluster }}`}} has more than one ready primary site."
+        - alert: CNPGHANoCurrentPrimary
+          expr: sum by (namespace, hacluster) (cnpg_ha_current_primary_site) != 1
+          for: {{ .Values.metrics.prometheusRule.noPrimaryFor }}
+          labels:
+            severity: critical
+            {{- with .Values.metrics.prometheusRule.ruleLabels }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+          annotations:
+            summary: "CNPG HA primary count is invalid"
+            description: "HACluster {{`{{ $labels.namespace }}`}}/{{`{{ $labels.hacluster }}`}} has no current primary or multiple current primary sites."
+        - alert: CNPGHASiteUnreachable
+          expr: cnpg_ha_site_reachable == 0
+          for: {{ .Values.metrics.prometheusRule.siteUnreachableFor }}
+          labels:
+            severity: warning
+            {{- with .Values.metrics.prometheusRule.ruleLabels }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+          annotations:
+            summary: "CNPG HA site is unreachable"
+            description: "Site {{`{{ $labels.site }}`}} for HACluster {{`{{ $labels.namespace }}`}}/{{`{{ $labels.hacluster }}`}} has not answered during recent reconciles."
+        - alert: CNPGHASiteNotReady
+          expr: cnpg_ha_site_ready == 0
+          for: {{ .Values.metrics.prometheusRule.siteNotReadyFor }}
+          labels:
+            severity: warning
+            {{- with .Values.metrics.prometheusRule.ruleLabels }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+          annotations:
+            summary: "CNPG HA site is not ready"
+            description: "Site {{`{{ $labels.site }}`}} for HACluster {{`{{ $labels.namespace }}`}}/{{`{{ $labels.hacluster }}`}} has no ready CNPG instance."
+        - alert: CNPGHAReplicaLagHigh
+          expr: cnpg_ha_replica_lag_seconds > {{ .Values.metrics.prometheusRule.replicaLagWarningSeconds }}
+          for: {{ .Values.metrics.prometheusRule.replicaLagFor }}
+          labels:
+            severity: warning
+            {{- with .Values.metrics.prometheusRule.ruleLabels }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+          annotations:
+            summary: "CNPG HA replica lag is high"
+            description: "Site {{`{{ $labels.site }}`}} for HACluster {{`{{ $labels.namespace }}`}}/{{`{{ $labels.hacluster }}`}} has replica lag above {{ .Values.metrics.prometheusRule.replicaLagWarningSeconds }} seconds."
+        - alert: CNPGHAReplicaLagCritical
+          expr: cnpg_ha_replica_lag_seconds > {{ .Values.metrics.prometheusRule.replicaLagCriticalSeconds }}
+          for: {{ .Values.metrics.prometheusRule.replicaLagFor }}
+          labels:
+            severity: critical
+            {{- with .Values.metrics.prometheusRule.ruleLabels }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+          annotations:
+            summary: "CNPG HA replica lag is critical"
+            description: "Site {{`{{ $labels.site }}`}} for HACluster {{`{{ $labels.namespace }}`}}/{{`{{ $labels.hacluster }}`}} has replica lag above {{ .Values.metrics.prometheusRule.replicaLagCriticalSeconds }} seconds."
+        - alert: CNPGHAAutomaticFailover
+          expr: increase(cnpg_ha_failover_total{mode="automatic"}[{{ .Values.metrics.prometheusRule.failoverWindow }}]) > 0
+          labels:
+            severity: warning
+            {{- with .Values.metrics.prometheusRule.ruleLabels }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+          annotations:
+            summary: "CNPG HA automatic failover occurred"
+            description: "HACluster {{`{{ $labels.namespace }}`}}/{{`{{ $labels.hacluster }}`}} completed an automatic failover in the last {{ .Values.metrics.prometheusRule.failoverWindow }}."
+{{- end }}

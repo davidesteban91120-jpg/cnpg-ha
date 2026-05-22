@@ -105,6 +105,36 @@ metrics:
     relabelings: []
     # -- Prometheus metric relabelings applied after scraping.
     metricRelabelings: []
+  prometheusRule:
+    # -- Create a Prometheus Operator PrometheusRule with cnpg-ha alerts.
+    enabled: false
+    # -- Namespace the PrometheusRule is created in (defaults to the release namespace).
+    namespace: ""
+    # -- Extra labels for the PrometheusRule (e.g. `release: kube-prometheus-stack`).
+    additionalLabels: {}
+    # -- Labels added to every generated alert.
+    ruleLabels: {}
+    # -- Evaluation interval for the alert group.
+    interval: 30s
+    siteUnreachableFor: 5m
+    siteNotReadyFor: 10m
+    noPrimaryFor: 5m
+    splitBrainFor: 1m
+    replicaLagFor: 5m
+    replicaLagWarningSeconds: 300
+    replicaLagCriticalSeconds: 900
+    failoverWindow: 15m
+
+grafanaDashboard:
+  # -- Create a Grafana dashboard ConfigMap for the Grafana sidecar.
+  enabled: false
+  # -- Namespace the dashboard ConfigMap is created in (defaults to the release namespace).
+  namespace: ""
+  # -- Extra labels for dashboard discovery. Defaults match kube-prometheus-stack sidecar examples.
+  additionalLabels:
+    grafana_dashboard: "1"
+  # -- Annotations applied to the dashboard ConfigMap.
+  annotations: {}
 
 health:
   # -- Address the /healthz and /readyz endpoints bind to.

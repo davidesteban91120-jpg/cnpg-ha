@@ -111,6 +111,15 @@ metrics:
     additionalLabels:
       release: kube-prometheus-stack
     interval: 15s
+  prometheusRule:
+    enabled: true
+    additionalLabels:
+      release: kube-prometheus-stack
+
+grafanaDashboard:
+  enabled: true
+  additionalLabels:
+    grafana_dashboard: "1"
 ```
 
 ### 5. Air-gapped install (private registry + pull secret)
@@ -136,7 +145,7 @@ with inline `# --` comments. Highlights:
 | Topology | `replicaCount`, `updateStrategy`, `revisionHistoryLimit` | Rollout shape |
 | Manager | `manager.leaderElect`, `manager.enableHTTP2`, `extraArgs` | Controller flags |
 | Logging | `log.level`, `log.encoder`, `log.timeEncoding`, `log.stacktraceLevel`, `log.devel` | zap logger tuning |
-| Metrics | `metrics.enabled`, `metrics.secure`, `metrics.bindAddress`, `metrics.service.*`, `metrics.serviceMonitor.*` | Prometheus integration |
+| Metrics | `metrics.enabled`, `metrics.secure`, `metrics.bindAddress`, `metrics.service.*`, `metrics.serviceMonitor.*`, `metrics.prometheusRule.*`, `grafanaDashboard.*` | Prometheus and Grafana integration |
 | Health | `health.bindAddress`, `health.liveness.*`, `health.readiness.*` | Probes |
 | Resources | `resources.limits.*`, `resources.requests.*` | CPU / RAM |
 | Scheduling | `nodeSelector`, `tolerations`, `podAntiAffinityPreset`, `affinity`, `topologySpreadConstraints`, `priorityClassName` | Placement |
