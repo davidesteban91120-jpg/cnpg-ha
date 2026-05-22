@@ -11,16 +11,35 @@ You may obtain a copy of the License at
 package controller
 
 import (
+	"context"
+	"errors"
+	"strings"
 	"testing"
 	"time"
 
+	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"sigs.k8s.io/controller-runtime/pkg/client/fake"
+
 	hav1alpha1 "github.com/davidesteban/cnpg-ha/api/v1alpha1"
+	"github.com/davidesteban/cnpg-ha/internal/postgres"
 )
+
+type fakePostgresProber struct {
+	cfg    postgres.Config
+	result postgres.Result
+	err    error
+}
+
+func (f *fakePostgresProber) Probe(_ context.Context, cfg postgres.Config) (postgres.Result, error) {
+	f.cfg = cfg
+	return f.result, f.err
+}
 
 func TestFindObservation(t *testing.T) {
 	prim := siteObservation{name: "site-a", reachable: true}
 	repB := siteObservation{name: siteB}
-	repC := siteObservation{name: "site-c"}
+	repC := siteObservation{name: siteC}
 	reps := []siteObservation{repB, repC}
 
 	tests := []struct {
@@ -29,7 +48,7 @@ func TestFindObservation(t *testing.T) {
 		wantName string // "" → expect nil
 	}{
 		{"matches primary", "site-a", "site-a"},
-		{"matches a replica", "site-c", "site-c"},
+		{"matches a replica", siteC, siteC},
 		{"unknown site → nil", "site-z", ""},
 	}
 	for _, tt := range tests {
@@ -89,6 +108,26 @@ func TestEffectiveHealthInterval(t *testing.T) {
 	}
 }
 
+func TestStabilizationCooldown(t *testing.T) {
+	tests := []struct {
+		name string
+		in   int32
+		want time.Duration
+	}{
+		{"default interval uses minimum", 0, minStabilizationCooldown},
+		{"short interval uses minimum", 5, minStabilizationCooldown},
+		{"long interval uses three intervals", 20, 60 * time.Second},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := stabilizationCooldown(hav1alpha1.FailoverSpec{HealthCheckIntervalSeconds: tt.in})
+			if got != tt.want {
+				t.Errorf("got %s, want %s", got, tt.want)
+			}
+		})
+	}
+}
+
 func makeHAForLookup() *hav1alpha1.HACluster {
 	return &hav1alpha1.HACluster{
 		Spec: hav1alpha1.HAClusterSpec{
@@ -98,7 +137,7 @@ func makeHAForLookup() *hav1alpha1.HACluster {
 			},
 			Replicas: []hav1alpha1.ReplicaSite{
 				{Name: siteB, ReplicationEndpoint: "ep-b"},
-				{Name: "site-c"}, // no endpoint
+				{Name: siteC}, // no endpoint
 			},
 		},
 	}
@@ -113,7 +152,7 @@ func TestReplicationEndpointFor(t *testing.T) {
 	}{
 		{"primary site endpoint", "site-a", "ep-a"},
 		{"replica with endpoint", siteB, "ep-b"},
-		{"replica without endpoint", "site-c", ""},
+		{"replica without endpoint", siteC, ""},
 		{"unknown site", "site-z", ""},
 	}
 	for _, tt := range tests {
@@ -125,12 +164,178 @@ func TestReplicationEndpointFor(t *testing.T) {
 	}
 }
 
+func TestCurrentPrimaryForPromotion(t *testing.T) {
+	base := &hav1alpha1.HACluster{
+		Spec: hav1alpha1.HAClusterSpec{
+			Primary: hav1alpha1.PrimarySite{Name: "site-a"},
+		},
+	}
+	healthyPrimary := siteObservation{name: "site-a", reachable: true, primary: true, ready: true}
+	healthyReplica := siteObservation{name: siteB, reachable: true, primary: false, ready: true}
+
+	t.Run("status current primary wins", func(t *testing.T) {
+		ha := base.DeepCopy()
+		ha.Status.CurrentPrimarySite = siteB
+		got, err := currentPrimaryForPromotion(ha, healthyPrimary, []siteObservation{healthyReplica})
+		if err != nil || got != siteB {
+			t.Fatalf("got (%q,%v), want (%q,nil)", got, err, siteB)
+		}
+	})
+
+	t.Run("observed primary wins before status is initialized", func(t *testing.T) {
+		got, err := currentPrimaryForPromotion(base, healthyPrimary, []siteObservation{healthyReplica})
+		if err != nil || got != "site-a" {
+			t.Fatalf("got (%q,%v), want (site-a,nil)", got, err)
+		}
+	})
+
+	t.Run("fallback to spec primary when no primary is observed", func(t *testing.T) {
+		got, err := currentPrimaryForPromotion(base,
+			siteObservation{name: "site-a", reachable: true, primary: true, ready: false},
+			[]siteObservation{healthyReplica})
+		if err != nil || got != "site-a" {
+			t.Fatalf("got (%q,%v), want (site-a,nil)", got, err)
+		}
+	})
+
+	t.Run("split-brain is rejected", func(t *testing.T) {
+		_, err := currentPrimaryForPromotion(base, healthyPrimary,
+			[]siteObservation{{name: siteB, reachable: true, primary: true, ready: true}})
+		if err == nil {
+			t.Fatalf("expected split-brain error")
+		}
+	})
+}
+
+func TestProbePostgresAddsLSNObservation(t *testing.T) {
+	ctx := context.Background()
+	scheme := buildPromoteScheme(t)
+	secret := &corev1.Secret{
+		ObjectMeta: metav1.ObjectMeta{Name: "pg-probe", Namespace: "db"},
+		Data: map[string][]byte{
+			"user":     []byte("probe"),
+			"password": []byte("secret"),
+		},
+	}
+	cli := fake.NewClientBuilder().WithScheme(scheme).WithObjects(secret).Build()
+	lag := 0.75
+	prober := &fakePostgresProber{result: postgres.Result{
+		LSN:        "0/16B6C50",
+		LSNValue:   0x16B6C50,
+		LagSeconds: &lag,
+	}}
+	r := &HAClusterReconciler{PostgresProber: prober}
+	obs := siteObservation{name: siteB, reachable: true, ready: true}
+
+	r.probePostgres(ctx, &obs, cli, hav1alpha1.ClusterRef{Namespace: "db", Name: "pg-prod"},
+		"pg-prod-rw.db.svc.cluster.local", &hav1alpha1.PostgresProbe{
+			Database: "app",
+			SSLMode:  "require",
+			UserSecretRef: corev1.SecretKeySelector{
+				LocalObjectReference: corev1.LocalObjectReference{Name: "pg-probe"},
+				Key:                  "user",
+			},
+			PasswordSecretRef: corev1.SecretKeySelector{
+				LocalObjectReference: corev1.LocalObjectReference{Name: "pg-probe"},
+				Key:                  "password",
+			},
+		})
+
+	if !obs.lsnKnown || obs.lsn != "0/16B6C50" || obs.lsnValue != 0x16B6C50 {
+		t.Fatalf("postgres probe did not populate LSN: %+v", obs)
+	}
+	if obs.lagSeconds == nil || *obs.lagSeconds != lag {
+		t.Fatalf("lagSeconds: got %v, want %v", obs.lagSeconds, lag)
+	}
+	if prober.cfg.Host != "pg-prod-rw.db.svc.cluster.local" ||
+		prober.cfg.Database != "app" ||
+		prober.cfg.User != "probe" ||
+		prober.cfg.Password != "secret" {
+		t.Errorf("unexpected postgres config: %+v", prober.cfg)
+	}
+}
+
+func TestProbePostgresBranches(t *testing.T) {
+	ctx := context.Background()
+	scheme := buildPromoteScheme(t)
+	secret := &corev1.Secret{
+		ObjectMeta: metav1.ObjectMeta{Name: "pg-probe", Namespace: "db"},
+		Data:       map[string][]byte{"user": []byte("probe"), "password": []byte("secret")},
+	}
+	cli := fake.NewClientBuilder().WithScheme(scheme).WithObjects(secret).Build()
+	spec := &hav1alpha1.PostgresProbe{
+		UserSecretRef: corev1.SecretKeySelector{
+			LocalObjectReference: corev1.LocalObjectReference{Name: "pg-probe"},
+			Key:                  "user",
+		},
+		PasswordSecretRef: corev1.SecretKeySelector{
+			LocalObjectReference: corev1.LocalObjectReference{Name: "pg-probe"},
+			Key:                  "password",
+		},
+	}
+
+	t.Run("nil spec leaves observation untouched", func(t *testing.T) {
+		r := &HAClusterReconciler{PostgresProber: &fakePostgresProber{}}
+		obs := siteObservation{name: siteB, reachable: true, ready: true}
+		r.probePostgres(ctx, &obs, cli, hav1alpha1.ClusterRef{Namespace: "db"}, "pg", nil)
+		if obs.lsnKnown {
+			t.Fatalf("nil spec should not probe: %+v", obs)
+		}
+	})
+
+	t.Run("missing endpoint appends skip reason", func(t *testing.T) {
+		r := &HAClusterReconciler{PostgresProber: &fakePostgresProber{}}
+		obs := siteObservation{name: siteB, reachable: true, ready: true, reason: "existing"}
+		r.probePostgres(ctx, &obs, cli, hav1alpha1.ClusterRef{Namespace: "db"}, "", spec)
+		if !strings.Contains(obs.reason, "existing; postgres probe skipped: endpoint is empty") {
+			t.Fatalf("unexpected reason: %q", obs.reason)
+		}
+	})
+
+	t.Run("probe error appends failure reason", func(t *testing.T) {
+		r := &HAClusterReconciler{PostgresProber: &fakePostgresProber{err: errors.New("boom")}}
+		obs := siteObservation{name: siteB, reachable: true, ready: true}
+		r.probePostgres(ctx, &obs, cli, hav1alpha1.ClusterRef{Namespace: "db"}, "pg", spec)
+		if obs.lsnKnown || !strings.Contains(obs.reason, "postgres probe failed: boom") {
+			t.Fatalf("unexpected observation: %+v", obs)
+		}
+	})
+}
+
+func TestSecretValue(t *testing.T) {
+	ctx := context.Background()
+	scheme := buildPromoteScheme(t)
+	secret := &corev1.Secret{
+		ObjectMeta: metav1.ObjectMeta{Name: "pg-probe", Namespace: "db"},
+		Data:       map[string][]byte{"user": []byte("probe")},
+	}
+	cli := fake.NewClientBuilder().WithScheme(scheme).WithObjects(secret).Build()
+
+	got, err := secretValue(ctx, cli, "db", corev1.SecretKeySelector{
+		LocalObjectReference: corev1.LocalObjectReference{Name: "pg-probe"},
+		Key:                  "user",
+	})
+	if err != nil || got != "probe" {
+		t.Fatalf("secretValue: got (%q,%v), want (probe,nil)", got, err)
+	}
+
+	if _, err := secretValue(ctx, cli, "db", corev1.SecretKeySelector{}); err == nil {
+		t.Fatalf("empty selector should fail")
+	}
+	if _, err := secretValue(ctx, cli, "db", corev1.SecretKeySelector{
+		LocalObjectReference: corev1.LocalObjectReference{Name: "pg-probe"},
+		Key:                  "missing",
+	}); err == nil {
+		t.Fatalf("missing key should fail")
+	}
+}
+
 func TestChooseTarget(t *testing.T) {
 	ha := &hav1alpha1.HACluster{
 		Spec: hav1alpha1.HAClusterSpec{
 			Replicas: []hav1alpha1.ReplicaSite{
 				{Name: siteB},
-				{Name: "site-c"},
+				{Name: siteC},
 			},
 		},
 	}
@@ -139,7 +344,7 @@ func TestChooseTarget(t *testing.T) {
 	}
 
 	t.Run("Ordered picks first healthy replica", func(t *testing.T) {
-		obs := []siteObservation{healthy(siteB), healthy("site-c")}
+		obs := []siteObservation{healthy(siteB), healthy(siteC)}
 		rep, idx, ok := chooseTarget(ha, obs, "site-a")
 		if !ok || rep.Name != siteB || idx != 0 {
 			t.Errorf("got (%q,%d,%v), want (site-b,0,true)", rep.Name, idx, ok)
@@ -148,17 +353,17 @@ func TestChooseTarget(t *testing.T) {
 
 	t.Run("skips the failed primary even if healthy", func(t *testing.T) {
 		// site-b is the failed primary → must be skipped, site-c chosen.
-		obs := []siteObservation{healthy(siteB), healthy("site-c")}
+		obs := []siteObservation{healthy(siteB), healthy(siteC)}
 		rep, idx, ok := chooseTarget(ha, obs, siteB)
-		if !ok || rep.Name != "site-c" || idx != 1 {
+		if !ok || rep.Name != siteC || idx != 1 {
 			t.Errorf("got (%q,%d,%v), want (site-c,1,true)", rep.Name, idx, ok)
 		}
 	})
 
 	t.Run("skips unreachable / not-ready / already-primary", func(t *testing.T) {
 		obs := []siteObservation{
-			{name: siteB, reachable: false},                               // unreachable
-			{name: "site-c", reachable: true, ready: true, primary: true}, // already primary
+			{name: siteB, reachable: false},                            // unreachable
+			{name: siteC, reachable: true, ready: true, primary: true}, // already primary
 		}
 		if _, _, ok := chooseTarget(ha, obs, "site-a"); ok {
 			t.Errorf("expected no candidate")
@@ -174,24 +379,52 @@ func TestChooseTarget(t *testing.T) {
 
 	mostAdvanced := &hav1alpha1.HACluster{
 		Spec: hav1alpha1.HAClusterSpec{
-			Replicas: []hav1alpha1.ReplicaSite{{Name: siteB}, {Name: "site-c"}},
+			Replicas: []hav1alpha1.ReplicaSite{{Name: siteB}, {Name: siteC}},
 			Failover: hav1alpha1.FailoverSpec{PromotionPolicy: hav1alpha1.PromotionPolicyMostAdvancedLSN},
 		},
 	}
 	withTL := func(n string, tl int64) siteObservation {
 		return siteObservation{name: n, reachable: true, ready: true, primary: false, timelineID: tl}
 	}
+	withLSN := func(n string, lsn string, lsnValue uint64, tl int64) siteObservation {
+		return siteObservation{
+			name: n, reachable: true, ready: true, primary: false,
+			timelineID: tl, lsnKnown: true, lsn: lsn, lsnValue: lsnValue,
+		}
+	}
 
-	t.Run("MostAdvancedLSN picks the highest timeline", func(t *testing.T) {
-		obs := []siteObservation{withTL(siteB, 2), withTL("site-c", 5)}
+	t.Run("MostAdvancedLSN picks the highest PostgreSQL LSN", func(t *testing.T) {
+		obs := []siteObservation{
+			withLSN(siteB, "0/20", 0x20, 9),
+			withLSN(siteC, "0/30", 0x30, 1),
+		}
 		rep, idx, ok := chooseTarget(mostAdvanced, obs, "site-a")
-		if !ok || rep.Name != "site-c" || idx != 1 {
+		if !ok || rep.Name != siteC || idx != 1 {
+			t.Errorf("got (%q,%d,%v), want (site-c,1,true)", rep.Name, idx, ok)
+		}
+	})
+
+	t.Run("MostAdvancedLSN prefers known LSN over timeline fallback", func(t *testing.T) {
+		obs := []siteObservation{
+			withTL(siteB, 99),
+			withLSN(siteC, "0/10", 0x10, 1),
+		}
+		rep, idx, ok := chooseTarget(mostAdvanced, obs, "site-a")
+		if !ok || rep.Name != siteC || idx != 1 {
+			t.Errorf("got (%q,%d,%v), want (site-c,1,true)", rep.Name, idx, ok)
+		}
+	})
+
+	t.Run("MostAdvancedLSN falls back to highest timeline when LSN is unknown", func(t *testing.T) {
+		obs := []siteObservation{withTL(siteB, 2), withTL(siteC, 5)}
+		rep, idx, ok := chooseTarget(mostAdvanced, obs, "site-a")
+		if !ok || rep.Name != siteC || idx != 1 {
 			t.Errorf("got (%q,%d,%v), want (site-c,1,true)", rep.Name, idx, ok)
 		}
 	})
 
 	t.Run("MostAdvancedLSN tie → earlier spec order wins", func(t *testing.T) {
-		obs := []siteObservation{withTL(siteB, 4), withTL("site-c", 4)}
+		obs := []siteObservation{withTL(siteB, 4), withTL(siteC, 4)}
 		rep, idx, ok := chooseTarget(mostAdvanced, obs, "site-a")
 		if !ok || rep.Name != siteB || idx != 0 {
 			t.Errorf("got (%q,%d,%v), want (site-b,0,true) on tie", rep.Name, idx, ok)
@@ -202,7 +435,7 @@ func TestChooseTarget(t *testing.T) {
 		// site-c has a higher timeline but is not ready → site-b chosen.
 		obs := []siteObservation{
 			withTL(siteB, 1),
-			{name: "site-c", reachable: true, ready: false, primary: false, timelineID: 9},
+			{name: siteC, reachable: true, ready: false, primary: false, timelineID: 9},
 		}
 		rep, _, ok := chooseTarget(mostAdvanced, obs, "site-a")
 		if !ok || rep.Name != siteB {

@@ -29,6 +29,7 @@ import (
 )
 
 const (
+	siteA = "site-a"
 	siteB = "site-b"
 	siteC = "site-c"
 )
@@ -63,8 +64,8 @@ func newAutoFixture(t *testing.T, threshold int32, primaryDown bool, replicas []
 		ObjectMeta: metav1.ObjectMeta{Name: "prod-db", Namespace: "ops"},
 		Spec: hav1alpha1.HAClusterSpec{
 			Primary: hav1alpha1.PrimarySite{
-				Name:                "site-a",
-				ClusterRef:          hav1alpha1.ClusterRef{Name: "pg-prod", Namespace: "site-a"},
+				Name:                siteA,
+				ClusterRef:          hav1alpha1.ClusterRef{Name: "pg-prod", Namespace: siteA},
 				ReplicationEndpoint: siteAEndpoint,
 			},
 			Replicas: repSpec,
@@ -77,7 +78,7 @@ func newAutoFixture(t *testing.T, threshold int32, primaryDown bool, replicas []
 
 	hubObjs := []client.Object{ha}
 	if !primaryDown {
-		hubObjs = append(hubObjs, newCNPGClusterForTest("site-a", nil, 1)) // primary, ready
+		hubObjs = append(hubObjs, newCNPGClusterForTest(siteA, nil, 1)) // primary, ready
 	}
 	hub := fake.NewClientBuilder().WithScheme(scheme).
 		WithObjects(hubObjs...).
@@ -300,7 +301,7 @@ func TestAutomaticFailover(t *testing.T) {
 		f.reconcile(t)
 		f.reconcile(t)
 		f.reconcile(t)
-		if cp := f.currentPrimary(t); cp != "site-a" {
+		if cp := f.currentPrimary(t); cp != siteA {
 			t.Errorf("healthy primary should remain; got %q", cp)
 		}
 	})
@@ -344,8 +345,8 @@ func TestAutomaticFailover_OldPrimaryFencedNotReconfigured(t *testing.T) {
 		ObjectMeta: metav1.ObjectMeta{Name: "prod-db", Namespace: "ops"},
 		Spec: hav1alpha1.HAClusterSpec{
 			Primary: hav1alpha1.PrimarySite{
-				Name:                "site-a",
-				ClusterRef:          hav1alpha1.ClusterRef{Name: "pg-prod", Namespace: "site-a"},
+				Name:                siteA,
+				ClusterRef:          hav1alpha1.ClusterRef{Name: "pg-prod", Namespace: siteA},
 				ReplicationEndpoint: siteAEndpoint,
 			},
 			Replicas: []hav1alpha1.ReplicaSite{{
@@ -365,9 +366,9 @@ func TestAutomaticFailover_OldPrimaryFencedNotReconfigured(t *testing.T) {
 	// site-a: present + reachable, CNPG-primary (spec.replica absent) but
 	// UNHEALTHY (readyInstances=0) → triggers the failover counter while
 	// remaining reachable for the topology reconcile.
-	siteACNPG := newCNPGClusterForTest("site-a", nil, 0)
+	siteACNPG := newCNPGClusterForTest(siteA, nil, 0)
 	hub := fake.NewClientBuilder().WithScheme(scheme).
-		WithObjects(ha, siteACNPG, newServiceForTest("site-a")).
+		WithObjects(ha, siteACNPG, newServiceForTest(siteA)).
 		WithStatusSubresource(&hav1alpha1.HACluster{}).Build()
 
 	remote := fake.NewClientBuilder().WithScheme(scheme).
@@ -393,20 +394,20 @@ func TestAutomaticFailover_OldPrimaryFencedNotReconfigured(t *testing.T) {
 		t.Fatalf("expected failover to site-b, currentPrimary=%q", gotHA.Status.CurrentPrimarySite)
 	}
 
-	siteA := &unstructured.Unstructured{}
-	siteA.SetGroupVersionKind(cnpgClusterGVK)
-	if err := hub.Get(ctx, types.NamespacedName{Namespace: "site-a", Name: "pg-prod"}, siteA); err != nil {
+	oldPrimaryCluster := &unstructured.Unstructured{}
+	oldPrimaryCluster.SetGroupVersionKind(cnpgClusterGVK)
+	if err := hub.Get(ctx, types.NamespacedName{Namespace: siteA, Name: "pg-prod"}, oldPrimaryCluster); err != nil {
 		t.Fatalf("get site-a cnpg: %v", err)
 	}
 
 	// THE regression assertion: the old primary must NOT have been turned
 	// into a replica behind rejoinPolicy=Manual.
-	enabled, found, _ := unstructured.NestedBool(siteA.Object, "spec", "replica", "enabled")
+	enabled, found, _ := unstructured.NestedBool(oldPrimaryCluster.Object, "spec", "replica", "enabled")
 	if found && enabled {
 		t.Errorf("old primary was silently reconfigured as replica (spec.replica.enabled=true) — Manual guard bypassed")
 	}
-	if siteA.GetAnnotations()[promotion.AnnotationFenced] != promotion.FencedAllInstances {
-		t.Errorf("old primary should be fenced under rejoinPolicy=Manual; annotations=%v", siteA.GetAnnotations())
+	if oldPrimaryCluster.GetAnnotations()[promotion.AnnotationFenced] != promotion.FencedAllInstances {
+		t.Errorf("old primary should be fenced under rejoinPolicy=Manual; annotations=%v", oldPrimaryCluster.GetAnnotations())
 	}
 
 	evs := drainEvents(rec)

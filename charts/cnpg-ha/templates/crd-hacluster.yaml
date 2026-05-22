@@ -141,6 +141,97 @@ spec:
                     minLength: 1
                     pattern: ^[a-z0-9]([-a-z0-9]*[a-z0-9])?$
                     type: string
+                  postgresProbe:
+                    description: |-
+                      PostgresProbe optionally enables a direct PostgreSQL WAL-location probe
+                      for this site.
+                    properties:
+                      database:
+                        default: postgres
+                        description: Database is the database used for the probe query.
+                        type: string
+                      endpoint:
+                        description: |-
+                          Endpoint is the PostgreSQL host (optionally host:port) used for the
+                          probe. When empty, the site's replicationEndpoint is used.
+                        type: string
+                      passwordSecretRef:
+                        description: |-
+                          PasswordSecretRef points to the key containing the PostgreSQL password.
+                          The Secret is read in the CNPG Cluster namespace of that site.
+                        properties:
+                          key:
+                            description: The key of the secret to select from.  Must
+                              be a valid secret key.
+                            type: string
+                          name:
+                            default: ""
+                            description: |-
+                              Name of the referent.
+                              This field is effectively required, but due to backwards compatibility is
+                              allowed to be empty. Instances of this type with an empty value here are
+                              almost certainly wrong.
+                              More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#names
+                            type: string
+                          optional:
+                            description: Specify whether the Secret or its key must
+                              be defined
+                            type: boolean
+                        required:
+                        - key
+                        type: object
+                        x-kubernetes-map-type: atomic
+                      port:
+                        default: 5432
+                        description: Port is the PostgreSQL port used when endpoint
+                          has no explicit port.
+                        format: int32
+                        maximum: 65535
+                        minimum: 1
+                        type: integer
+                      sslMode:
+                        default: require
+                        description: |-
+                          SSLMode is passed to the PostgreSQL client. Common values are disable,
+                          require, verify-ca, and verify-full.
+                        enum:
+                        - disable
+                        - allow
+                        - prefer
+                        - require
+                        - verify-ca
+                        - verify-full
+                        type: string
+                      userSecretRef:
+                        description: |-
+                          UserSecretRef points to the key containing the PostgreSQL username.
+                          The Secret is read in the CNPG Cluster namespace of that site.
+                        properties:
+                          key:
+                            description: The key of the secret to select from.  Must
+                              be a valid secret key.
+                            type: string
+                          name:
+                            default: ""
+                            description: |-
+                              Name of the referent.
+                              This field is effectively required, but due to backwards compatibility is
+                              allowed to be empty. Instances of this type with an empty value here are
+                              almost certainly wrong.
+                              More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#names
+                            type: string
+                          optional:
+                            description: Specify whether the Secret or its key must
+                              be defined
+                            type: boolean
+                        required:
+                        - key
+                        type: object
+                        x-kubernetes-map-type: atomic
+                    required:
+                    - passwordSecretRef
+                    - userSecretRef
+                    type: object
                   replicationEndpoint:
                     description: |-
                       ReplicationEndpoint is the host (optionally host:port) that the OTHER
@@ -219,6 +310,98 @@ spec:
                       minLength: 1
                       pattern: ^[a-z0-9]([-a-z0-9]*[a-z0-9])?$
                       type: string
+                    postgresProbe:
+                      description: |-
+                        PostgresProbe optionally enables a direct PostgreSQL WAL-location probe
+                        for this site.
+                      properties:
+                        database:
+                          default: postgres
+                          description: Database is the database used for the probe
+                            query.
+                          type: string
+                        endpoint:
+                          description: |-
+                            Endpoint is the PostgreSQL host (optionally host:port) used for the
+                            probe. When empty, the site's replicationEndpoint is used.
+                          type: string
+                        passwordSecretRef:
+                          description: |-
+                            PasswordSecretRef points to the key containing the PostgreSQL password.
+                            The Secret is read in the CNPG Cluster namespace of that site.
+                          properties:
+                            key:
+                              description: The key of the secret to select from.  Must
+                                be a valid secret key.
+                              type: string
+                            name:
+                              default: ""
+                              description: |-
+                                Name of the referent.
+                                This field is effectively required, but due to backwards compatibility is
+                                allowed to be empty. Instances of this type with an empty value here are
+                                almost certainly wrong.
+                                More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#names
+                              type: string
+                            optional:
+                              description: Specify whether the Secret or its key must
+                                be defined
+                              type: boolean
+                          required:
+                          - key
+                          type: object
+                          x-kubernetes-map-type: atomic
+                        port:
+                          default: 5432
+                          description: Port is the PostgreSQL port used when endpoint
+                            has no explicit port.
+                          format: int32
+                          maximum: 65535
+                          minimum: 1
+                          type: integer
+                        sslMode:
+                          default: require
+                          description: |-
+                            SSLMode is passed to the PostgreSQL client. Common values are disable,
+                            require, verify-ca, and verify-full.
+                          enum:
+                          - disable
+                          - allow
+                          - prefer
+                          - require
+                          - verify-ca
+                          - verify-full
+                          type: string
+                        userSecretRef:
+                          description: |-
+                            UserSecretRef points to the key containing the PostgreSQL username.
+                            The Secret is read in the CNPG Cluster namespace of that site.
+                          properties:
+                            key:
+                              description: The key of the secret to select from.  Must
+                                be a valid secret key.
+                              type: string
+                            name:
+                              default: ""
+                              description: |-
+                                Name of the referent.
+                                This field is effectively required, but due to backwards compatibility is
+                                allowed to be empty. Instances of this type with an empty value here are
+                                almost certainly wrong.
+                                More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#names
+                              type: string
+                            optional:
+                              description: Specify whether the Secret or its key must
+                                be defined
+                              type: boolean
+                          required:
+                          - key
+                          type: object
+                          x-kubernetes-map-type: atomic
+                      required:
+                      - passwordSecretRef
+                      - userSecretRef
+                      type: object
                     replicationEndpoint:
                       description: |-
                         ReplicationEndpoint is the host (optionally host:port) that the OTHER
@@ -338,6 +521,12 @@ spec:
                     kubectl and is the basis for the promotion logic that consults the
                     state of each candidate.
                   properties:
+                    currentLSN:
+                      description: |-
+                        CurrentLSN is the WAL location observed through the optional PostgreSQL
+                        probe. It is empty when postgresProbe is not configured or when the
+                        probe failed.
+                      type: string
                     lastObservedTime:
                       description: |-
                         LastObservedTime is the timestamp of the Reconcile that produced
@@ -370,6 +559,13 @@ spec:
                         Ready indicates whether the site's CNPG Cluster CR has at least one
                         ready instance (status.readyInstances > 0).
                       type: boolean
+                    replicationLagMilliseconds:
+                      description: |-
+                        ReplicationLagMilliseconds is the replay lag observed through the
+                        optional PostgreSQL probe. Primary sites report 0. It is omitted when
+                        the probe is not configured or the lag cannot be computed yet.
+                      format: int64
+                      type: integer
                     role:
                       description: Role observed for the site during the last Reconcile.
                       enum:

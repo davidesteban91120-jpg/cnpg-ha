@@ -54,6 +54,7 @@ The **hub** hosts the operator. It can be one of the sites *or* a dedicated cont
 | `internal/controller` | `HACluster` Reconciler — observes the sites, maintains `status.currentPrimarySite`, triggers manual/automatic failover and reconciles the topology | `api/v1alpha1`, `remoteclient`, `health`, `promotion`, `metrics` |
 | `internal/remoteclient` | Cache of remote K8s clients (kubeconfig → `client.Client`) | `client-go`, `controller-runtime/client` |
 | `internal/health` | Per-site health probes through the CNPG `Cluster` CR (unstructured, no CNPG Go dependency) | `controller-runtime/client` |
+| `internal/postgres` | Optional direct PostgreSQL WAL probe (`pg_last_wal_replay_lsn` / `pg_current_wal_lsn`) for byte-accurate promotion choice and lag metrics | `pgx` |
 | `internal/promotion` | Idempotent promotion / reconfiguration actions: fence, promote, flip Cilium, repoint replicas | `controller-runtime/client` |
 | `internal/metrics` | cnpg-ha-specific Prometheus collectors, registered into the controller-runtime registry | `prometheus/client_golang` |
 
@@ -81,6 +82,8 @@ Reconcile(HACluster)
 │       └─ observePrimary → health.Probe(local client)
 │             └─ cli.Get(cnpg.Cluster) + parseCluster(unstructured)
 │                  → siteObservation{reachable, primary, ready, phase, reason, timelineID}
+│             └─ optional postgresProbe:
+│                  → siteObservation{lsn, lsnValue, lagSeconds}
 │
 ├─ 3. Observe every replica (remote client)
 │       └─ for each rep ∈ Spec.Replicas:
@@ -128,7 +131,7 @@ Key functions:
 
 ### 3.2 Target loop
 
-The target loop keeps the same invariants, with two remaining improvements: a real LSN/lag probe on the Postgres side and explicit timeouts on every long remote call.
+The target loop keeps the same invariants, with one remaining improvement: explicit timeouts on every long remote call.
 
 ```
 Reconcile(HACluster) [target]
@@ -136,7 +139,9 @@ Reconcile(HACluster) [target]
 │       └─ remoteclient.GetOrCreate(site) → client.Client
 │
 ├─ 2. Observed state: for each site
-│       ├─ health.Probe(ctx, site) → SiteHealth { Reachable, PrimaryReady, LSN, LagSeconds }
+│       ├─ health.Probe(ctx, site) → SiteHealth { Reachable, PrimaryReady }
+│       ├─ postgres.Probe(ctx, site) when spec.<site>.postgresProbe is configured
+│       │    → LSN, LagSeconds
 │       └─ kept in memory (never in status beyond a summary)
 │
 ├─ 3. Decision
@@ -237,7 +242,7 @@ The user / service account carried by the kubeconfig must hold **as few rights a
 |---|---|---|---|
 | `cnpg_ha_current_primary_site` | Gauge | `hacluster`, `namespace`, `site` | 1 if the site is primary, 0 otherwise |
 | `cnpg_ha_site_reachable` | Gauge | `hacluster`, `namespace`, `site` | 1 if the remote cluster responds |
-| `cnpg_ha_replica_lag_seconds` | Gauge | `hacluster`, `namespace`, `site` | Observed replication lag |
+| `cnpg_ha_replica_lag_seconds` | Gauge | `hacluster`, `namespace`, `site` | Observed replay lag from the optional PostgreSQL probe |
 | `cnpg_ha_failover_total` | Counter | `hacluster`, `namespace`, `mode` | Number of failovers performed |
 | `cnpg_ha_failover_duration_seconds` | Histogram | `hacluster`, `namespace`, `mode` | Successful promotion duration |
 | `cnpg_ha_reconcile_errors_total` | Counter | `controller` | Errors on the operator side itself |
@@ -441,9 +446,9 @@ timeline follow, no data loss).
 9. ✅ Cross-site CA prerequisite documented ([§9.6](#96-cross-site-ca-prerequisite-streaming-replication-trust)).
 10. ✅ `Automatic` mode: in-RAM failure counter (mutex), `failureThreshold`, fires without annotation, requeue at the `healthCheckIntervalSeconds` cadence, split-brain guard. Validated end-to-end on KinD.
 11. ✅ Rejoin safety fix: `reconcileReplicaTopology` now reclassifies each site through an **authoritative re-read** of the CNPG CR (not the status-mutated observation buffer) — a just-demoted old primary is no longer silently rebuilt as a replica, bypassing `rejoinPolicy=Manual`. Regression guard `TestAutomaticFailover_OldPrimaryFencedNotReconfigured`.
-12. ✅ Prometheus metrics: `internal/metrics` (`cnpg_ha_current_primary_site`, `_site_reachable`, `_site_ready`, `_split_brain`, `cnpg_ha_failover_total{mode}`, `cnpg_ha_failover_duration_seconds{mode}`), registered in the controller-runtime registry. `replica_lag_seconds` not exposed (see §10.2 — CNPG does not expose the lag).
+12. ✅ Prometheus metrics: `internal/metrics` (`cnpg_ha_current_primary_site`, `_site_reachable`, `_site_ready`, `_replica_lag_seconds`, `_split_brain`, `cnpg_ha_failover_total{mode}`, `cnpg_ha_failover_duration_seconds{mode}`), registered in the controller-runtime registry. `replica_lag_seconds` is populated when `postgresProbe` is configured.
 13. ✅ `internal/health` extracted: `Probe` + `SiteHealth` (pure, testable), `parseCluster`; the controller no longer holds inline observation logic. Exposes `timelineID` as a progress proxy.
-14. ✅ `promotionPolicy` applied in `chooseTarget`: `Ordered` (spec order) and `MostAdvancedLSN` (highest timeline, tie-break on spec order — timeline proxy, not a true LSN).
+14. ✅ `promotionPolicy` applied in `chooseTarget`: `Ordered` (spec order) and `MostAdvancedLSN` (highest PostgreSQL LSN when `postgresProbe` is configured, `timelineID` fallback otherwise, tie-break on spec order).
 15. ✅ `CHANGELOG.md` (Keep a Changelog format): `[Unreleased]` section covering additions, fixes, CRD schema changes (`replicationEndpoint`, `rejoinPolicy`) and known limitations.
 16. ✅ `remoteclient` cache refreshed on rotation: keyed by the kubeconfig Secret's `resourceVersion` (a rotated kubeconfig is picked up on the next reconcile, not only on a manager restart). Graceful degradation when the Secret is transiently unreadable but a client is already cached.
 17. ✅ **envtest** integration tests (real API server, run by `make test`): minimal CNPG CRD fixture (`test/crd/`), Ginkgo specs covering *observation* (status + conditions) and *end-to-end manual failover* (remoteclient backed by a kubeconfig derived from the envtest `rest.Config` → real Promote/Fence/Cilium flip/strip-annotation/status). The exhaustive matrix (split-brain, DR, topology, auto) stays covered by the fast deterministic fake-client suites.
@@ -458,5 +463,5 @@ timeline follow, no data loss).
 
 | # | Topic | Detail |
 |---|---|---|
-| 1 | **Exact `MostAdvancedLSN` + `cnpg_ha_replica_lag_seconds`** | Both blocked by the same cause: `Cluster.status` from CNPG exposes neither LSN nor lag. Requires a dedicated probe (`pg_stat_replication` / `pg_last_wal_receive_lsn` read) — an architectural decision to take (do we step out of the "dependency-light" read-only stance?). Meanwhile: `timelineID` proxy. |
+| 1 | **Promotion pre-checks based on lag/quorum** | The PostgreSQL probe now exposes LSN and replay lag. The next step is to make promotion refusal configurable: maximum accepted lag, minimum reachable-site quorum, and maintenance windows. |
 | 2 | **Promote the API to `v1beta1`** | Once the schema has stabilised: conversion webhook, no more breaking changes without deprecation. |

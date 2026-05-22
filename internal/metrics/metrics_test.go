@@ -21,9 +21,11 @@ func TestSetSite(t *testing.T) {
 	CurrentPrimarySite.Reset()
 	SiteReachable.Reset()
 	SiteReady.Reset()
+	ReplicaLagSeconds.Reset()
 
 	SetSite("db", "prod-db", "site-a", true, true, true)
 	SetSite("db", "prod-db", "site-b", false, true, false)
+	SetReplicaLag("db", "prod-db", "site-b", 2.5)
 
 	if v := testutil.ToFloat64(CurrentPrimarySite.WithLabelValues("prod-db", "db", "site-a")); v != 1 {
 		t.Errorf("current_primary_site site-a: got %v, want 1", v)
@@ -36,6 +38,13 @@ func TestSetSite(t *testing.T) {
 	}
 	if v := testutil.ToFloat64(SiteReachable.WithLabelValues("prod-db", "db", "site-b")); v != 1 {
 		t.Errorf("site_reachable site-b: got %v, want 1", v)
+	}
+	if v := testutil.ToFloat64(ReplicaLagSeconds.WithLabelValues("prod-db", "db", "site-b")); v != 2.5 {
+		t.Errorf("replica_lag_seconds site-b: got %v, want 2.5", v)
+	}
+	ClearReplicaLag("db", "prod-db", "site-b")
+	if v := testutil.ToFloat64(ReplicaLagSeconds.WithLabelValues("prod-db", "db", "site-b")); v != 0 {
+		t.Errorf("replica_lag_seconds site-b after clear: got %v, want 0", v)
 	}
 }
 

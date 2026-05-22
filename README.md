@@ -24,11 +24,11 @@ Background reading on the *why* (CNPG primitives, replica cluster mechanics, RTO
 - **Multi-cluster observation** — Reads each site's CNPG `Cluster` CR via the kubeconfig Secrets referenced by the `HACluster` CR. Reports per-site state in `status.sites[]` and `Available` / `Degraded` / `SplitBrain` conditions.
 - **Manual failover** — Honors the `ha.cnpg.io/promote: <site>` annotation when `spec.failover.mode: Manual`. Emits `Failover*` / `PromoteRejected` events for audit.
 - **Automatic failover** — In-RAM consecutive-failure counter, configurable `failureThreshold`, requeue at `healthCheckIntervalSeconds`. Post-failover anti-flapping cooldown (`max(30 s, 3×healthCheckInterval)`) prevents `A→B→C` cascades.
-- **Promotion target selection** — `promotionPolicy: Ordered` (spec order) or `MostAdvancedLSN` (today: `timelineID` proxy; native LSN probe on the roadmap).
+- **Promotion target selection** — `promotionPolicy: Ordered` (spec order) or `MostAdvancedLSN` (real PostgreSQL LSN when `postgresProbe` is configured, `timelineID` fallback otherwise).
 - **Topology reconfiguration** — Surviving replicas are re-pointed at the new primary; a returning old primary is either fenced (`rejoinPolicy: Manual`) or rebuilt as a replica (`AutoReplica`).
 - **Cilium Cluster Mesh integration** — Flips `service.cilium.io/global` and `service.cilium.io/affinity` on the `*-rw` Services as part of the promotion sequence, so client traffic follows the new writer across clusters.
 - **Split-brain detection** — Sets `SplitBrain=True` when more than one site is observed as CNPG-primary + ready, and guards the promotion path against it.
-- **Prometheus metrics** — `cnpg_ha_current_primary_site`, `_site_reachable`, `_site_ready`, `_split_brain`, `cnpg_ha_failover_total{mode}`, `cnpg_ha_failover_duration_seconds{mode}` exposed on the manager metrics endpoint.
+- **Prometheus metrics** — `cnpg_ha_current_primary_site`, `_site_reachable`, `_site_ready`, `_replica_lag_seconds`, `_split_brain`, `cnpg_ha_failover_total{mode}`, `cnpg_ha_failover_duration_seconds{mode}` exposed on the manager metrics endpoint.
 - **SLSA L3 supply chain** — Image is Cosign-signed (keyless), ships with an SPDX-JSON SBOM attestation and an `slsa-github-generator` provenance attestation. CVE scans (govulncheck, gosec, osv-scanner, trivy fs, trivy image, gitleaks) run on every PR. See [`docs/SUPPLY_CHAIN.md`](docs/SUPPLY_CHAIN.md).
 
 ### What it does *not* do (by design)
@@ -37,7 +37,7 @@ Background reading on the *why* (CNPG primitives, replica cluster mechanics, RTO
 - Creating the CNPG `Cluster` CRs — `cnpg-ha` consumes existing ones.
 - Postgres itself, backup, snapshots.
 - Inter-site DNS / load-balancing for client traffic — bring your own (service mesh, GSLB).
-- Fine-grained replication lag probing on the Postgres side — see roadmap v0.2.
+- Creating or rotating PostgreSQL probe credentials — bring your own read-only Secret per site.
 
 ## Architecture at a glance
 
@@ -111,6 +111,37 @@ make e2e-shared-ca
 
 Step-by-step setup and alternatives → [`docs/ONBOARDING.md`](docs/ONBOARDING.md).
 
+### Optional PostgreSQL LSN probe
+
+`MostAdvancedLSN` uses the optional `postgresProbe` block when it is
+configured on the candidate sites. The probe connects to PostgreSQL, reads
+`pg_last_wal_replay_lsn()` on replicas (or `pg_current_wal_lsn()` on a
+primary), and publishes `status.sites[].currentLSN`,
+`status.sites[].replicationLagMilliseconds`, and
+`cnpg_ha_replica_lag_seconds`.
+
+The referenced Secret must live in the same namespace as that site's CNPG
+`Cluster` and should belong to a read-only PostgreSQL user:
+
+```yaml
+spec:
+  replicas:
+    - name: site-b
+      clusterRef:
+        name: pg-prod
+        namespace: site-b
+      replicationEndpoint: pg-prod-rw.site-b.svc.cluster.local
+      postgresProbe:
+        database: postgres
+        sslMode: require
+        userSecretRef:
+          name: pg-probe
+          key: username
+        passwordSecretRef:
+          name: pg-probe
+          key: password
+```
+
 ## Status and maturity
 
 | Area | State |
@@ -123,15 +154,14 @@ Step-by-step setup and alternatives → [`docs/ONBOARDING.md`](docs/ONBOARDING.m
 | Prometheus metrics + ServiceMonitor | ✅ |
 | Helm chart with values schema | ✅ |
 | Supply chain (Cosign keyless, SBOM, SLSA L3) | ✅ Pipeline active in CI |
-| Native Postgres LSN/lag probe | ⏳ Roadmap v0.2 |
+| Native Postgres LSN/lag probe | ✅ Optional `postgresProbe` per site |
 | API `v1beta1` + conversion webhook | ⏳ Roadmap v0.3 |
 
 ## Roadmap
 
 ### v0.2 — short term
 
-- **Native Postgres probe** — read `pg_stat_replication` / `pg_last_wal_receive_lsn` against observed primaries. Unlocks true `MostAdvancedLSN` (instead of the `timelineID` proxy) and the `cnpg_ha_replica_lag_seconds` metric.
-- **Configurable promotion pre-checks** — maximum accepted lag, minimum quorum of reachable sites, maintenance windows.
+- **Promotion pre-checks** — maximum accepted lag, minimum quorum of reachable sites, maintenance windows.
 - **`HACluster` validation webhook** — consistency of site names, `replicationEndpoint` required as soon as a second site is declared, kubeconfig Secret existence.
 
 ### v0.3 → v1beta1 — medium term

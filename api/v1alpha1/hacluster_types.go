@@ -116,6 +116,53 @@ type ClusterRef struct {
 	Namespace string `json:"namespace"`
 }
 
+// PostgresProbe configures an optional direct PostgreSQL probe for one site.
+// When present, cnpg-ha connects to the site's Postgres endpoint and reads
+// the current WAL location. This unlocks byte-accurate MostAdvancedLSN
+// target selection and replica lag metrics. When omitted, the operator keeps
+// using the CNPG Cluster status only.
+type PostgresProbe struct {
+	// Endpoint is the PostgreSQL host (optionally host:port) used for the
+	// probe. When empty, the site's replicationEndpoint is used.
+	//
+	// +optional
+	Endpoint string `json:"endpoint,omitempty"`
+
+	// Port is the PostgreSQL port used when endpoint has no explicit port.
+	//
+	// +kubebuilder:default=5432
+	// +kubebuilder:validation:Minimum=1
+	// +kubebuilder:validation:Maximum=65535
+	// +optional
+	Port int32 `json:"port,omitempty"`
+
+	// Database is the database used for the probe query.
+	//
+	// +kubebuilder:default=postgres
+	// +optional
+	Database string `json:"database,omitempty"`
+
+	// SSLMode is passed to the PostgreSQL client. Common values are disable,
+	// require, verify-ca, and verify-full.
+	//
+	// +kubebuilder:default=require
+	// +kubebuilder:validation:Enum=disable;allow;prefer;require;verify-ca;verify-full
+	// +optional
+	SSLMode string `json:"sslMode,omitempty"`
+
+	// UserSecretRef points to the key containing the PostgreSQL username.
+	// The Secret is read in the CNPG Cluster namespace of that site.
+	//
+	// +required
+	UserSecretRef corev1.SecretKeySelector `json:"userSecretRef"`
+
+	// PasswordSecretRef points to the key containing the PostgreSQL password.
+	// The Secret is read in the CNPG Cluster namespace of that site.
+	//
+	// +required
+	PasswordSecretRef corev1.SecretKeySelector `json:"passwordSecretRef"`
+}
+
 // PrimarySite describes the local / bootstrap site declared at install
 // time. After a failover the current primary is carried by
 // status.currentPrimarySite, not by this field.
@@ -151,6 +198,12 @@ type PrimarySite struct {
 	//
 	// +optional
 	ReplicationEndpoint string `json:"replicationEndpoint,omitempty"`
+
+	// PostgresProbe optionally enables a direct PostgreSQL WAL-location probe
+	// for this site.
+	//
+	// +optional
+	PostgresProbe *PostgresProbe `json:"postgresProbe,omitempty"`
 }
 
 // ReplicaSite describes a remote CNPG cluster acting as a replica.
@@ -188,6 +241,12 @@ type ReplicaSite struct {
 	//
 	// +optional
 	ReplicationEndpoint string `json:"replicationEndpoint,omitempty"`
+
+	// PostgresProbe optionally enables a direct PostgreSQL WAL-location probe
+	// for this site.
+	//
+	// +optional
+	PostgresProbe *PostgresProbe `json:"postgresProbe,omitempty"`
 }
 
 // FailoverSpec groups the failover decision parameters.
@@ -295,6 +354,20 @@ type SiteStatus struct {
 	//
 	// +optional
 	LastObservedTime *metav1.Time `json:"lastObservedTime,omitempty"`
+
+	// CurrentLSN is the WAL location observed through the optional PostgreSQL
+	// probe. It is empty when postgresProbe is not configured or when the
+	// probe failed.
+	//
+	// +optional
+	CurrentLSN string `json:"currentLSN,omitempty"`
+
+	// ReplicationLagMilliseconds is the replay lag observed through the
+	// optional PostgreSQL probe. Primary sites report 0. It is omitted when
+	// the probe is not configured or the lag cannot be computed yet.
+	//
+	// +optional
+	ReplicationLagMilliseconds *int64 `json:"replicationLagMilliseconds,omitempty"`
 }
 
 // HAClusterStatus describes the observed state of an HACluster.

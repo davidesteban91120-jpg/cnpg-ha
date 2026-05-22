@@ -13,9 +13,8 @@ You may obtain a copy of the License at
 // no compile-time dependency on the CloudNativePG module.
 //
 // CNPG's Cluster.status does NOT expose a replication LSN nor a lag in
-// seconds; the most-advanced signal available there is status.timelineID
-// (a promoted/diverged instance carries a higher timeline). TimelineID is
-// therefore exposed as a coarse advancement proxy — it is not a true LSN.
+// seconds; status.timelineID is exposed as a coarse fallback when the
+// optional direct PostgreSQL probe is not configured.
 package health
 
 import (
@@ -53,6 +52,16 @@ type SiteHealth struct {
 	// TimelineID mirrors status.timelineID — a coarse "how advanced"
 	// proxy (CNPG exposes no LSN/lag in Cluster.status). 0 when unknown.
 	TimelineID int64
+	// LSNKnown is true when the optional PostgreSQL probe successfully read a
+	// WAL location from the site.
+	LSNKnown bool
+	// LSN is the PostgreSQL WAL location read by the optional SQL probe.
+	LSN string
+	// LSNValue is the parsed numeric representation of LSN for ordering.
+	LSNValue uint64
+	// LagSeconds is the replay lag read by the optional SQL probe. It is nil
+	// when the probe is not configured or PostgreSQL cannot compute lag yet.
+	LagSeconds *float64
 }
 
 // Probe reads the CNPG Cluster at ref through cli and returns its health.

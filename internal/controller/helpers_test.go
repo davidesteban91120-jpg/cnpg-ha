@@ -39,6 +39,8 @@ func findCondition(conditions []metav1.Condition, t string) *metav1.Condition {
 
 func TestToSiteStatus(t *testing.T) {
 	now := fixedNow()
+	lag := 1.25
+	lagMS := int64(1250)
 	tests := []struct {
 		name string
 		obs  siteObservation
@@ -75,21 +77,26 @@ func TestToSiteStatus(t *testing.T) {
 			},
 		},
 		{
-			name: "reachable + non-primary + ready → role Replica",
+			name: "reachable + non-primary + ready + postgres probe → role Replica with LSN",
 			obs: siteObservation{
-				name:      "site-b",
-				reachable: true,
-				primary:   false,
-				ready:     true,
-				phase:     "Cluster in healthy state",
+				name:       "site-b",
+				reachable:  true,
+				primary:    false,
+				ready:      true,
+				phase:      "Cluster in healthy state",
+				lsnKnown:   true,
+				lsn:        "0/16B6C50",
+				lagSeconds: &lag,
 			},
 			want: hav1alpha1.SiteStatus{
-				Name:             "site-b",
-				Role:             hav1alpha1.SiteRoleReplica,
-				Reachable:        true,
-				Ready:            true,
-				Phase:            "Cluster in healthy state",
-				LastObservedTime: &now,
+				Name:                       "site-b",
+				Role:                       hav1alpha1.SiteRoleReplica,
+				Reachable:                  true,
+				Ready:                      true,
+				Phase:                      "Cluster in healthy state",
+				LastObservedTime:           &now,
+				CurrentLSN:                 "0/16B6C50",
+				ReplicationLagMilliseconds: &lagMS,
 			},
 		},
 		{

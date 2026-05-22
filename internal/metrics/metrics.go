@@ -47,6 +47,13 @@ var (
 		Help: "1 if the site's CNPG Cluster had a ready instance at the last reconcile, else 0.",
 	}, []string{"hacluster", "namespace", "site"})
 
+	// ReplicaLagSeconds is the replay lag observed through the optional
+	// direct PostgreSQL probe.
+	ReplicaLagSeconds = prometheus.NewGaugeVec(prometheus.GaugeOpts{
+		Name: subsystem + "_replica_lag_seconds",
+		Help: "PostgreSQL replay lag in seconds observed through the optional direct probe.",
+	}, []string{"hacluster", "namespace", "site"})
+
 	// SplitBrain is 1 when more than one site was observed as CNPG-primary
 	// and ready (writes may diverge), else 0.
 	SplitBrain = prometheus.NewGaugeVec(prometheus.GaugeOpts{
@@ -79,6 +86,7 @@ func MustRegister() {
 		CurrentPrimarySite,
 		SiteReachable,
 		SiteReady,
+		ReplicaLagSeconds,
 		SplitBrain,
 		FailoverTotal,
 		FailoverDurationSeconds,
@@ -98,6 +106,17 @@ func SetSite(haNamespace, haName, site string, isPrimary, reachable, ready bool)
 	CurrentPrimarySite.WithLabelValues(haName, haNamespace, site).Set(boolGauge(isPrimary))
 	SiteReachable.WithLabelValues(haName, haNamespace, site).Set(boolGauge(reachable))
 	SiteReady.WithLabelValues(haName, haNamespace, site).Set(boolGauge(ready))
+}
+
+// SetReplicaLag publishes the replay lag gauge for a site.
+func SetReplicaLag(haNamespace, haName, site string, seconds float64) {
+	ReplicaLagSeconds.WithLabelValues(haName, haNamespace, site).Set(seconds)
+}
+
+// ClearReplicaLag removes a stale replay lag gauge when the probe no longer
+// reports a value for a site.
+func ClearReplicaLag(haNamespace, haName, site string) {
+	ReplicaLagSeconds.DeleteLabelValues(haName, haNamespace, site)
 }
 
 // SetSplitBrain publishes the split-brain gauge for one HACluster.

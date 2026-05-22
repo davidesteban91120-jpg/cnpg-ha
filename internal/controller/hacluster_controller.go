@@ -13,6 +13,7 @@ package controller
 import (
 	"context"
 	"fmt"
+	"strings"
 	"sync"
 	"time"
 
@@ -30,6 +31,7 @@ import (
 	hav1alpha1 "github.com/davidesteban/cnpg-ha/api/v1alpha1"
 	"github.com/davidesteban/cnpg-ha/internal/health"
 	hametrics "github.com/davidesteban/cnpg-ha/internal/metrics"
+	"github.com/davidesteban/cnpg-ha/internal/postgres"
 	"github.com/davidesteban/cnpg-ha/internal/promotion"
 	"github.com/davidesteban/cnpg-ha/internal/remoteclient"
 )
@@ -69,6 +71,10 @@ const (
 	// during which automatic failover is suspended (CNPG promotion restart
 	// of the new primary typically takes ~10–30s).
 	minStabilizationCooldown = 30 * time.Second
+
+	// postgresProbeTimeout bounds each optional direct SQL probe so a slow
+	// database endpoint cannot stall the Reconcile loop.
+	postgresProbeTimeout = 5 * time.Second
 )
 
 // cnpgClusterGVK is the GVK of the CNPG Cluster CR. Single source of truth
@@ -92,9 +98,10 @@ var cnpgClusterGVK = health.CNPGClusterGVK
 //     Each step is idempotent so a partial failure can be retried.
 type HAClusterReconciler struct {
 	client.Client
-	Scheme        *runtime.Scheme
-	RemoteClients *remoteclient.Cache
-	Recorder      events.EventRecorder
+	Scheme         *runtime.Scheme
+	RemoteClients  *remoteclient.Cache
+	Recorder       events.EventRecorder
+	PostgresProber postgres.Prober
 
 	// failMu guards failCount. failCount holds, per HACluster, the number of
 	// consecutive reconciles where the current primary was observed
@@ -115,6 +122,10 @@ type siteObservation struct {
 	phase      string // status.phase reported by CNPG
 	reason     string // short explanation when not ready/unreachable
 	timelineID int64  // status.timelineID — coarse advancement proxy (no true LSN)
+	lsnKnown   bool
+	lsn        string
+	lsnValue   uint64
+	lagSeconds *float64
 }
 
 // siteObsFromHealth adapts a health.SiteHealth into the controller's
@@ -128,6 +139,10 @@ func siteObsFromHealth(name string, h health.SiteHealth) siteObservation {
 		phase:      h.Phase,
 		reason:     h.Reason,
 		timelineID: h.TimelineID,
+		lsnKnown:   h.LSNKnown,
+		lsn:        h.LSN,
+		lsnValue:   h.LSNValue,
+		lagSeconds: h.LagSeconds,
 	}
 }
 
@@ -338,11 +353,10 @@ func (r *HAClusterReconciler) handleAutomaticFailover(
 //
 // Policy:
 //   - Ordered: first eligible replica in spec order.
-//   - MostAdvancedLSN: eligible replica with the highest status.timelineID,
-//     ties broken by spec order. NOTE: CNPG's Cluster.status exposes no true
-//     LSN/lag, so this uses timelineID as a coarse advancement proxy (a
-//     promoted/diverged instance carries a higher timeline). It is not a
-//     byte-precise LSN comparison — see internal/health.
+//   - MostAdvancedLSN: eligible replica with the highest PostgreSQL LSN when
+//     the optional postgresProbe is configured. Candidates with an observed
+//     LSN beat candidates without one. If no candidate has an LSN, the
+//     function falls back to status.timelineID and keeps spec-order ties.
 //
 // Any unset/unknown policy falls back to Ordered (deterministic).
 func chooseTarget(
@@ -365,9 +379,7 @@ func chooseTarget(
 			}
 			continue
 		}
-		// MostAdvancedLSN: strictly higher timeline wins; equal keeps the
-		// earlier spec position (stable tie-break).
-		if replicaObs[i].timelineID > replicaObs[best].timelineID {
+		if moreAdvanced(replicaObs[i], replicaObs[best]) {
 			best = i
 		}
 	}
@@ -375,6 +387,16 @@ func chooseTarget(
 		return hav1alpha1.ReplicaSite{}, 0, false
 	}
 	return ha.Spec.Replicas[best], best, true
+}
+
+func moreAdvanced(candidate, current siteObservation) bool {
+	if candidate.lsnKnown != current.lsnKnown {
+		return candidate.lsnKnown
+	}
+	if candidate.lsnKnown {
+		return candidate.lsnValue > current.lsnValue
+	}
+	return candidate.timelineID > current.timelineID
 }
 
 // reconcileReplicaTopology makes every site other than effectivePrimary
@@ -803,6 +825,11 @@ func (r *HAClusterReconciler) publishMetrics(
 	for _, obs := range append([]siteObservation{primaryObs}, replicaObs...) {
 		hametrics.SetSite(ha.Namespace, ha.Name, obs.name,
 			obs.name == currentPrimary, obs.reachable, obs.ready)
+		if obs.lagSeconds != nil {
+			hametrics.SetReplicaLag(ha.Namespace, ha.Name, obs.name, *obs.lagSeconds)
+		} else {
+			hametrics.ClearReplicaLag(ha.Namespace, ha.Name, obs.name)
+		}
 	}
 	hametrics.SetSplitBrain(ha.Namespace, ha.Name, splitBrain)
 }
@@ -878,12 +905,14 @@ func (r *HAClusterReconciler) observePrimary(ctx context.Context, ha *hav1alpha1
 		Name:      ha.Spec.Primary.ClusterRef.Name,
 	}
 	obs := siteObsFromHealth(ha.Spec.Primary.Name, health.Probe(ctx, r.Client, ref))
+	r.probePostgres(ctx, &obs, r.Client, ha.Spec.Primary.ClusterRef, ha.Spec.Primary.ReplicationEndpoint, ha.Spec.Primary.PostgresProbe)
 	log.V(1).Info("primary site observed",
 		"site", obs.name,
 		"reachable", obs.reachable,
 		"primary", obs.primary,
 		"ready", obs.ready,
 		"phase", obs.phase,
+		"lsn", obs.lsn,
 		"reason", obs.reason,
 	)
 	return obs
@@ -911,15 +940,108 @@ func (r *HAClusterReconciler) observeReplica(ctx context.Context, ha *hav1alpha1
 		Name:      rep.ClusterRef.Name,
 	}
 	obs := siteObsFromHealth(rep.Name, health.Probe(ctx, cli, ref))
+	r.probePostgres(ctx, &obs, cli, rep.ClusterRef, rep.ReplicationEndpoint, rep.PostgresProbe)
 	log.V(1).Info("replica site observed",
 		"site", obs.name,
 		"reachable", obs.reachable,
 		"primary", obs.primary,
 		"ready", obs.ready,
 		"phase", obs.phase,
+		"lsn", obs.lsn,
 		"reason", obs.reason,
 	)
 	return obs
+}
+
+func (r *HAClusterReconciler) probePostgres(
+	ctx context.Context,
+	obs *siteObservation,
+	cli client.Client,
+	ref hav1alpha1.ClusterRef,
+	replicationEndpoint string,
+	spec *hav1alpha1.PostgresProbe,
+) {
+	if spec == nil || !obs.reachable || !obs.ready {
+		return
+	}
+
+	cfg, err := r.postgresProbeConfig(ctx, cli, ref.Namespace, replicationEndpoint, spec)
+	if err != nil {
+		obs.reason = appendReason(obs.reason, fmt.Sprintf("postgres probe skipped: %v", err))
+		return
+	}
+
+	prober := r.PostgresProber
+	if prober == nil {
+		prober = postgres.SQLProber{}
+	}
+	probeCtx, cancel := context.WithTimeout(ctx, postgresProbeTimeout)
+	defer cancel()
+
+	got, err := prober.Probe(probeCtx, cfg)
+	if err != nil {
+		obs.reason = appendReason(obs.reason, fmt.Sprintf("postgres probe failed: %v", err))
+		return
+	}
+	obs.lsnKnown = true
+	obs.lsn = got.LSN
+	obs.lsnValue = got.LSNValue
+	obs.lagSeconds = got.LagSeconds
+}
+
+func (r *HAClusterReconciler) postgresProbeConfig(
+	ctx context.Context,
+	cli client.Client,
+	namespace string,
+	replicationEndpoint string,
+	spec *hav1alpha1.PostgresProbe,
+) (postgres.Config, error) {
+	endpoint := spec.Endpoint
+	if endpoint == "" {
+		endpoint = replicationEndpoint
+	}
+	if endpoint == "" {
+		return postgres.Config{}, fmt.Errorf("endpoint is empty")
+	}
+
+	user, err := secretValue(ctx, cli, namespace, spec.UserSecretRef)
+	if err != nil {
+		return postgres.Config{}, fmt.Errorf("read user secret: %w", err)
+	}
+	password, err := secretValue(ctx, cli, namespace, spec.PasswordSecretRef)
+	if err != nil {
+		return postgres.Config{}, fmt.Errorf("read password secret: %w", err)
+	}
+	return postgres.Config{
+		Host:     endpoint,
+		Port:     spec.Port,
+		Database: spec.Database,
+		User:     user,
+		Password: password,
+		SSLMode:  spec.SSLMode,
+	}, nil
+}
+
+func secretValue(ctx context.Context, cli client.Client, namespace string, sel corev1.SecretKeySelector) (string, error) {
+	if sel.Name == "" || sel.Key == "" {
+		return "", fmt.Errorf("secret name and key are required")
+	}
+	var secret corev1.Secret
+	if err := cli.Get(ctx, types.NamespacedName{Namespace: namespace, Name: sel.Name}, &secret); err != nil {
+		return "", fmt.Errorf("get secret %s/%s: %w", namespace, sel.Name, err)
+	}
+	value, ok := secret.Data[sel.Key]
+	if !ok {
+		return "", fmt.Errorf("secret %s/%s has no key %q", namespace, sel.Name, sel.Key)
+	}
+	return string(value), nil
+}
+
+func appendReason(existing, extra string) string {
+	if existing == "" {
+		return extra
+	}
+	return strings.Join([]string{existing, extra}, "; ")
 }
 
 // decideCurrentPrimary chooses the single site currently acting as the HA
@@ -985,14 +1107,24 @@ func toSiteStatus(obs siteObservation, now metav1.Time) hav1alpha1.SiteStatus {
 		}
 	}
 	return hav1alpha1.SiteStatus{
-		Name:             obs.name,
-		Role:             role,
-		Reachable:        obs.reachable,
-		Ready:            obs.ready,
-		Phase:            obs.phase,
-		Message:          obs.reason,
-		LastObservedTime: &now,
+		Name:                       obs.name,
+		Role:                       role,
+		Reachable:                  obs.reachable,
+		Ready:                      obs.ready,
+		Phase:                      obs.phase,
+		Message:                    obs.reason,
+		LastObservedTime:           &now,
+		CurrentLSN:                 obs.lsn,
+		ReplicationLagMilliseconds: lagMilliseconds(obs.lagSeconds),
 	}
+}
+
+func lagMilliseconds(seconds *float64) *int64 {
+	if seconds == nil {
+		return nil
+	}
+	ms := int64(*seconds * 1000)
+	return &ms
 }
 
 // buildSiteStatuses aggregates the primary and replica observations into a
