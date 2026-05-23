@@ -98,6 +98,9 @@ metrics:
     interval: 30s
     # -- Scrape timeout.
     scrapeTimeout: 10s
+    # -- Preserve labels emitted by cnpg-ha metrics when they collide with
+    # scrape labels added by Prometheus (notably the HACluster `namespace` label).
+    honorLabels: true
     # -- Skip TLS certificate verification. Set to `false` and provide certs
     # via cert-manager for production.
     insecureSkipVerify: true
@@ -135,6 +138,9 @@ grafanaDashboard:
     grafana_dashboard: "1"
   # -- Annotations applied to the dashboard ConfigMap.
   annotations: {}
+  datasource:
+    # -- Grafana datasource UID used by the provisioned dashboard.
+    uid: prometheus
 
 health:
   # -- Address the /healthz and /readyz endpoints bind to.

@@ -118,6 +118,8 @@ metrics:
 
 grafanaDashboard:
   enabled: true
+  datasource:
+    uid: prometheus
   additionalLabels:
     grafana_dashboard: "1"
 ```

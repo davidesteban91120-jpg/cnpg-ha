@@ -47,7 +47,7 @@ data:
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
+            "uid": {{ .Values.grafanaDashboard.datasource.uid | quote }}
           },
           "fieldConfig": {
             "defaults": {
@@ -117,7 +117,7 @@ data:
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
+            "uid": {{ .Values.grafanaDashboard.datasource.uid | quote }}
           },
           "fieldConfig": {
             "defaults": {
@@ -174,7 +174,7 @@ data:
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
+            "uid": {{ .Values.grafanaDashboard.datasource.uid | quote }}
           },
           "fieldConfig": {
             "defaults": {
@@ -219,7 +219,7 @@ data:
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
+            "uid": {{ .Values.grafanaDashboard.datasource.uid | quote }}
           },
           "fieldConfig": {
             "defaults": {
@@ -281,7 +281,7 @@ data:
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
+            "uid": {{ .Values.grafanaDashboard.datasource.uid | quote }}
           },
           "fieldConfig": {
             "defaults": {
@@ -365,7 +365,7 @@ data:
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
+            "uid": {{ .Values.grafanaDashboard.datasource.uid | quote }}
           },
           "fieldConfig": {
             "defaults": {
@@ -458,7 +458,7 @@ data:
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
+            "uid": {{ .Values.grafanaDashboard.datasource.uid | quote }}
           },
           "fieldConfig": {
             "defaults": {
@@ -551,7 +551,7 @@ data:
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
+            "uid": {{ .Values.grafanaDashboard.datasource.uid | quote }}
           },
           "fieldConfig": {
             "defaults": {
@@ -635,7 +635,7 @@ data:
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
+            "uid": {{ .Values.grafanaDashboard.datasource.uid | quote }}
           },
           "fieldConfig": {
             "defaults": {
@@ -736,7 +736,7 @@ data:
             "current": {},
             "datasource": {
               "type": "prometheus",
-              "uid": "${DS_PROMETHEUS}"
+              "uid": {{ .Values.grafanaDashboard.datasource.uid | quote }}
             },
             "definition": "label_values(cnpg_ha_current_primary_site, namespace)",
             "hide": 0,
@@ -759,7 +759,7 @@ data:
             "current": {},
             "datasource": {
               "type": "prometheus",
-              "uid": "${DS_PROMETHEUS}"
+              "uid": {{ .Values.grafanaDashboard.datasource.uid | quote }}
             },
             "definition": "label_values(cnpg_ha_current_primary_site{namespace=~\"$namespace\"}, hacluster)",
             "hide": 0,

@@ -21,6 +21,7 @@ spec:
       path: /metrics
       interval: {{ .Values.metrics.serviceMonitor.interval }}
       scrapeTimeout: {{ .Values.metrics.serviceMonitor.scrapeTimeout }}
+      honorLabels: {{ .Values.metrics.serviceMonitor.honorLabels }}
       {{- if .Values.metrics.secure }}
       scheme: https
       bearerTokenFile: /var/run/secrets/kubernetes.io/serviceaccount/token
