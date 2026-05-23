@@ -28,7 +28,7 @@ PG=pg-prod
 OP_NS=cnpg-ha-system
 OP_DEPLOY=cnpg-ha-controller-manager
 # KinD names a single-node cluster's control-plane container
-# "<cluster>-control-plane" (no associative array — macOS ships bash 3.2).
+# "<cluster>-control-plane" (no associative array — Bash 3.2 compatible).
 
 log()  { printf '\033[1;34m[fo]\033[0m %s\n' "$*"; }
 ok()   { printf '\033[1;32m[ ok ]\033[0m %s\n' "$*"; }
@@ -51,7 +51,11 @@ command -v docker >/dev/null  || fail "docker not found"
 cd "$REPO_ROOT"
 
 # --- 1. build + load operator image ---------------------------------------
-if ! docker image inspect "$IMG" >/dev/null 2>&1; then
+# Set REBUILD=1 to force a rebuild even when the image already exists. The
+# plain "inspect, skip if present" guard otherwise silently reuses a stale
+# image (e.g. one built before an API-group change), so the operator runs an
+# outdated binary against the freshly applied CRD/RBAC.
+if [ "${REBUILD:-0}" = "1" ] || ! docker image inspect "$IMG" >/dev/null 2>&1; then
   log "building operator image $IMG"
   make docker-build IMG="$IMG" >/dev/null
 fi

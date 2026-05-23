@@ -58,8 +58,8 @@ helm --kube-context "$CTX_A" upgrade --install "$KPS_RELEASE" \
   --namespace "$MON_NS" --create-namespace \
   --set crds.enabled=true \
   --set alertmanager.enabled=false \
-  --set prometheus-node-exporter.enabled=false \
-  --set kube-state-metrics.enabled=false \
+  --set nodeExporter.enabled=false \
+  --set kubeStateMetrics.enabled=false \
   --set defaultRules.create=false \
   --set kubeApiServer.enabled=false \
   --set kubelet.enabled=false \
@@ -100,7 +100,13 @@ if kubectl --context "$CTX_A" -n "$OP_NS" get deploy cnpg-ha-controller-manager 
 fi
 
 # Ensure the operator image is available on site-a (40 already loaded it; load
-# again if a fresh build is around).
+# again if a fresh build is around). Set REBUILD=1 to force a rebuild first —
+# otherwise a stale image (e.g. one built before an API-group change) is
+# silently reused and the operator runs an outdated binary against the chart.
+if [ "${REBUILD:-0}" = "1" ]; then
+  log "rebuilding operator image $IMG"
+  make -C "$REPO_ROOT" docker-build IMG="$IMG" >/dev/null
+fi
 if docker image inspect "$IMG" >/dev/null 2>&1; then
   kind load docker-image "$IMG" --name site-a >/dev/null 2>&1 || true
 fi
@@ -151,7 +157,7 @@ Grafana (admin / admin):
   open http://localhost:3000  → dashboard "CNPG HA"
 
 Prometheus:
-  kubectl --context $CTX_A -n $MON_NS port-forward svc/$KPS_RELEASE-kube-prometheus-prometheus 9090:9090
+  kubectl --context $CTX_A -n $MON_NS port-forward svc/$KPS_RELEASE-kube-prometheus-stack-prometheus 9090:9090
   open http://localhost:9090/targets  → target "$OP_NS/$OP_RELEASE-metrics" should be UP
   open http://localhost:9090/alerts   → cnpg-ha.rules group
 
