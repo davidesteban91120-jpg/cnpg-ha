@@ -91,7 +91,7 @@ jobs:
         # version, so the duplication is unnecessary.
         # Note: --call-analysis=none does NOT work — 'none' is parsed as a
         # language name and Go remains enabled by default.
-        uses: google/osv-scanner-action/osv-scanner-action@98b584ee2ed2da3935ccce10e06739d54cdcd20b # v2.0.0
+        uses: google/osv-scanner-action/osv-scanner-action@9a498708959aeaef5ef730655706c5a1df1edbc2 # v2.3.8
         with:
           scan-args: |-
             --recursive
