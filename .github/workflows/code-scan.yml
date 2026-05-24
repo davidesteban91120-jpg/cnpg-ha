@@ -119,6 +119,7 @@ jobs:
     permissions:
       contents: read
       security-events: write
+      pull-requests: read  # gitleaks-action lists PR commits to scan the diff
     steps:
       - uses: actions/checkout@v4
         with:
