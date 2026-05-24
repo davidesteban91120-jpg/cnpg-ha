@@ -5,17 +5,42 @@
 set -euo pipefail
 
 CLUSTERS=(site-a site-b site-c)
+INOTIFY_MAX_USER_INSTANCES="${INOTIFY_MAX_USER_INSTANCES:-8192}"
+INOTIFY_MAX_USER_WATCHES="${INOTIFY_MAX_USER_WATCHES:-1048576}"
 log() { printf '\033[1;34m[mesh]\033[0m %s\n' "$*"; }
+
+command -v docker >/dev/null || { echo "docker not found" >&2; exit 1; }
+command -v helm >/dev/null || { echo "helm not found" >&2; exit 1; }
+
+tune_kind_node() {
+  local name=$1 node="${1}-control-plane"
+  log "tuning inotify on $name ($node)"
+  docker exec "$node" sysctl -w \
+    "fs.inotify.max_user_instances=$INOTIFY_MAX_USER_INSTANCES" \
+    "fs.inotify.max_user_watches=$INOTIFY_MAX_USER_WATCHES" >/dev/null
+}
+
+for name in "${CLUSTERS[@]}"; do
+  tune_kind_node "$name"
+done
 
 for i in "${!CLUSTERS[@]}"; do
   name=${CLUSTERS[$i]}
   id=$(( i + 1 ))
   ctx="kind-$name"
-  log "installing Cilium on $name (cluster.id=$id)"
-  cilium install --context "$ctx" \
-    --set cluster.name="$name" \
-    --set cluster.id="$id" \
-    --set ipam.mode=kubernetes
+  if helm --kube-context "$ctx" -n kube-system status cilium >/dev/null 2>&1; then
+    log "reconciling Cilium on $name (cluster.id=$id)"
+    cilium upgrade --context "$ctx" \
+      --set cluster.name="$name" \
+      --set cluster.id="$id" \
+      --set ipam.mode=kubernetes
+  else
+    log "installing Cilium on $name (cluster.id=$id)"
+    cilium install --context "$ctx" \
+      --set cluster.name="$name" \
+      --set cluster.id="$id" \
+      --set ipam.mode=kubernetes
+  fi
 done
 
 for name in "${CLUSTERS[@]}"; do
