@@ -69,6 +69,18 @@ var (
 		Help: "WAL bytes the site is behind the current primary, computed from per-site LSN gaps; 0 on the primary and on caught-up replicas.",
 	}, []string{"hacluster", "namespace", "site"})
 
+	// SiteCurrentLSNBytes is the absolute WAL position of the site in
+	// bytes, sourced from pg_current_wal_lsn() on the primary and
+	// pg_last_wal_replay_lsn() on a replica. Published only when the
+	// optional direct PostgreSQL probe returns an LSN; cleared otherwise.
+	// Lets the dashboard plot per-site WAL progression and visually
+	// compare where each site is in the WAL stream, complementing the
+	// pairwise replica_lag_bytes view.
+	SiteCurrentLSNBytes = prometheus.NewGaugeVec(prometheus.GaugeOpts{
+		Name: subsystem + "_site_current_lsn_bytes",
+		Help: "Absolute WAL position of the site in bytes (pg_current_wal_lsn on the primary, pg_last_wal_replay_lsn on a replica).",
+	}, []string{"hacluster", "namespace", "site"})
+
 	// SplitBrain is 1 when more than one site was observed as CNPG-primary
 	// and ready (writes may diverge), else 0.
 	SplitBrain = prometheus.NewGaugeVec(prometheus.GaugeOpts{
@@ -103,6 +115,7 @@ func MustRegister() {
 		SiteReady,
 		ReplicaLagSeconds,
 		ReplicaLagBytes,
+		SiteCurrentLSNBytes,
 		SplitBrain,
 		FailoverTotal,
 		FailoverDurationSeconds,
@@ -148,6 +161,20 @@ func SetReplicaLagBytes(haNamespace, haName, site string, bytes float64) {
 // site unreachable).
 func ClearReplicaLagBytes(haNamespace, haName, site string) {
 	ReplicaLagBytes.DeleteLabelValues(haName, haNamespace, site)
+}
+
+// SetSiteCurrentLSNBytes publishes the absolute WAL position of a site.
+// Callers convert the pg_lsn uint64 to float64; the conversion is exact
+// up to 2^53 bytes (~8 PiB of WAL), which is well beyond any realistic
+// deployment lifetime.
+func SetSiteCurrentLSNBytes(haNamespace, haName, site string, bytes float64) {
+	SiteCurrentLSNBytes.WithLabelValues(haName, haNamespace, site).Set(bytes)
+}
+
+// ClearSiteCurrentLSNBytes removes the WAL position gauge when no LSN
+// is known for the site (probe disabled, unreachable, transient failure).
+func ClearSiteCurrentLSNBytes(haNamespace, haName, site string) {
+	SiteCurrentLSNBytes.DeleteLabelValues(haName, haNamespace, site)
 }
 
 // SetSplitBrain publishes the split-brain gauge for one HACluster.
