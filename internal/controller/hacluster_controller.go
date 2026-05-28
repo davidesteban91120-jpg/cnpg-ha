@@ -862,6 +862,12 @@ func (r *HAClusterReconciler) publishMetrics(
 		default:
 			hametrics.SetReplicaLagBytes(ha.Namespace, ha.Name, obs.name, float64(primaryLSN-obs.lsnValue))
 		}
+
+		if obs.lsnKnown {
+			hametrics.SetSiteCurrentLSNBytes(ha.Namespace, ha.Name, obs.name, float64(obs.lsnValue))
+		} else {
+			hametrics.ClearSiteCurrentLSNBytes(ha.Namespace, ha.Name, obs.name)
+		}
 	}
 	hametrics.SetSplitBrain(ha.Namespace, ha.Name, splitBrain)
 }
