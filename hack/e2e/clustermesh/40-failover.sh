@@ -89,7 +89,56 @@ for s in site-b site-c; do
 done
 ok "remote kubeconfig Secrets created (mesh-reachable)"
 
-# --- 4. HACluster (Automatic, per-site endpoints) -------------------------
+# --- 3b. probe credentials (pg_monitor user + per-site Secret) ------------
+# postgresProbe (configured per-site below) reads pg_last_wal_replay_lsn()
+# on replicas and pg_current_wal_lsn() on the primary, which require
+# pg_monitor membership. Create a dedicated cnpg_ha_probe role on the
+# bootstrap primary (site-a) so the role propagates to site-b/c via
+# streaming, then publish a pg-probe Secret in $NS on every site that
+# hosts a CNPG Cluster the operator will probe. Without this, the
+# cnpg_ha_replica_lag_seconds gauge never gets a value -> the Grafana
+# "CNPG HA" dashboard reports "No data" for replica lag.
+PROBE_USER=cnpg_ha_probe
+PROBE_PW=$(openssl rand -hex 16)
+
+# Find a healthy CNPG primary across the three sites. On a fresh 30->40
+# pipeline this is site-a; when 40 is re-run on top of an existing
+# post-failover topology the primary may be site-b or site-c. We scan
+# every site and use the first CNPG Cluster whose status reports a
+# currentPrimary pod — that pod is where we can exec psql as superuser
+# (peer auth on the unix socket) to create the role, which then streams
+# to every replica via WAL.
+PRIMARY_CTX=""; PRIMARY_POD=""
+for s in site-a site-b site-c; do
+  pod=$(kubectl --context "kind-$s" -n "$NS" get cluster "$PG" \
+        -o jsonpath='{.status.currentPrimary}' 2>/dev/null) || true
+  if [ -n "$pod" ]; then
+    PRIMARY_CTX="kind-$s"; PRIMARY_POD="$pod"
+    break
+  fi
+done
+[ -n "$PRIMARY_CTX" ] || fail "no CNPG primary found on any of site-a/b/c (cluster $NS/$PG missing everywhere?)"
+
+log "creating $PROBE_USER role on ${PRIMARY_CTX#kind-} (pod $PRIMARY_POD)"
+kubectl --context "$PRIMARY_CTX" -n "$NS" exec "$PRIMARY_POD" -c postgres -- \
+  psql -U postgres -v ON_ERROR_STOP=1 -tAc "
+DO \$\$ BEGIN
+  IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname='$PROBE_USER') THEN
+    CREATE ROLE $PROBE_USER LOGIN PASSWORD '$PROBE_PW' IN ROLE pg_monitor;
+  ELSE
+    ALTER ROLE $PROBE_USER WITH LOGIN PASSWORD '$PROBE_PW';
+  END IF;
+END \$\$;" >/dev/null
+log "publishing pg-probe Secret on $NS in every site"
+for ctx in "$CTX_A" kind-site-b kind-site-c; do
+  kubectl --context "$ctx" -n "$NS" create secret generic pg-probe \
+    --from-literal=username="$PROBE_USER" \
+    --from-literal=password="$PROBE_PW" \
+    --dry-run=client -o yaml | kubectl --context "$ctx" apply -f - >/dev/null
+done
+ok "pg-probe Secret distributed to site-a/site-b/site-c"
+
+# --- 4. HACluster (Automatic, per-site endpoints + postgresProbe) ---------
 log "applying HACluster prod-db (Automatic)"
 kubectl --context "$CTX_A" apply -f - >/dev/null <<EOF
 apiVersion: ha.cnpg.io/v1alpha1
@@ -100,15 +149,36 @@ spec:
     name: site-a
     clusterRef: { name: $PG, namespace: $NS }
     replicationEndpoint: pg-site-a-rw.$NS.svc.cluster.local
+    postgresProbe:
+      endpoint: pg-site-a-rw.$NS.svc.cluster.local
+      port: 5432
+      database: postgres
+      sslMode: require
+      userSecretRef:     { name: pg-probe, key: username }
+      passwordSecretRef: { name: pg-probe, key: password }
   replicas:
     - name: site-b
       kubeconfigSecretRef: { name: site-b-kubeconfig, key: kubeconfig }
       clusterRef: { name: $PG, namespace: $NS }
       replicationEndpoint: pg-site-b-rw.$NS.svc.cluster.local
+      postgresProbe:
+        endpoint: pg-site-b-rw.$NS.svc.cluster.local
+        port: 5432
+        database: postgres
+        sslMode: require
+        userSecretRef:     { name: pg-probe, key: username }
+        passwordSecretRef: { name: pg-probe, key: password }
     - name: site-c
       kubeconfigSecretRef: { name: site-c-kubeconfig, key: kubeconfig }
       clusterRef: { name: $PG, namespace: $NS }
       replicationEndpoint: pg-site-c-rw.$NS.svc.cluster.local
+      postgresProbe:
+        endpoint: pg-site-c-rw.$NS.svc.cluster.local
+        port: 5432
+        database: postgres
+        sslMode: require
+        userSecretRef:     { name: pg-probe, key: username }
+        passwordSecretRef: { name: pg-probe, key: password }
   failover:
     mode: Automatic
     healthCheckIntervalSeconds: 10
