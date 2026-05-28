@@ -815,20 +815,52 @@ func (r *HAClusterReconciler) event(ha *hav1alpha1.HACluster, eventType, reason,
 }
 
 // publishMetrics mirrors the just-computed status into the Prometheus
-// collectors: one current_primary/reachable/ready triplet per site plus the
-// split-brain gauge. Side-effect only — metrics globals are the justified
-// exception to the no-mutable-globals rule (CONVENTION §4).
+// collectors: one current_primary/reachable/ready triplet per site, the
+// time-based and byte-based replica lag gauges, plus the split-brain
+// gauge. Side-effect only — metrics globals are the justified exception
+// to the no-mutable-globals rule (CONVENTION §4).
+//
+// The byte-lag is derived from per-site LSNs already collected by the
+// optional direct PostgreSQL probe: we locate the current primary's LSN
+// in this reconcile pass and publish max(0, primaryLSN - siteLSN) for
+// every site. The uint64 underflow guard keeps a transiently-fenced
+// or just-promoted replica (whose LSN may briefly exceed the recorded
+// primary LSN) at 0 rather than 2^64, which would otherwise spike the
+// dashboard. Sites without a known LSN — probe disabled, unreachable,
+// or transient failure — have their byte-lag gauge cleared so stale
+// values do not survive across reconciles.
 func (r *HAClusterReconciler) publishMetrics(
 	ha *hav1alpha1.HACluster, currentPrimary string, splitBrain bool,
 	primaryObs siteObservation, replicaObs []siteObservation,
 ) {
-	for _, obs := range append([]siteObservation{primaryObs}, replicaObs...) {
+	all := append([]siteObservation{primaryObs}, replicaObs...)
+
+	var primaryLSN uint64
+	var primaryLSNKnown bool
+	for _, obs := range all {
+		if obs.name == currentPrimary && obs.lsnKnown {
+			primaryLSN = obs.lsnValue
+			primaryLSNKnown = true
+			break
+		}
+	}
+
+	for _, obs := range all {
 		hametrics.SetSite(ha.Namespace, ha.Name, obs.name,
 			obs.name == currentPrimary, obs.reachable, obs.ready)
 		if obs.lagSeconds != nil {
 			hametrics.SetReplicaLag(ha.Namespace, ha.Name, obs.name, *obs.lagSeconds)
 		} else {
 			hametrics.ClearReplicaLag(ha.Namespace, ha.Name, obs.name)
+		}
+
+		switch {
+		case !primaryLSNKnown || !obs.lsnKnown:
+			hametrics.ClearReplicaLagBytes(ha.Namespace, ha.Name, obs.name)
+		case obs.name == currentPrimary || obs.lsnValue >= primaryLSN:
+			hametrics.SetReplicaLagBytes(ha.Namespace, ha.Name, obs.name, 0)
+		default:
+			hametrics.SetReplicaLagBytes(ha.Namespace, ha.Name, obs.name, float64(primaryLSN-obs.lsnValue))
 		}
 	}
 	hametrics.SetSplitBrain(ha.Namespace, ha.Name, splitBrain)
