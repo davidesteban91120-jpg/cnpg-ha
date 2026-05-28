@@ -48,10 +48,25 @@ var (
 	}, []string{"hacluster", "namespace", "site"})
 
 	// ReplicaLagSeconds is the replay lag observed through the optional
-	// direct PostgreSQL probe.
+	// direct PostgreSQL probe. NOTE: this is the clock-based metric
+	// (clock_timestamp() - pg_last_xact_replay_timestamp()) and therefore
+	// keeps growing on an idle primary even though the replica is fully
+	// caught up at the WAL level. Prefer ReplicaLagBytes for dashboards.
 	ReplicaLagSeconds = prometheus.NewGaugeVec(prometheus.GaugeOpts{
 		Name: subsystem + "_replica_lag_seconds",
-		Help: "PostgreSQL replay lag in seconds observed through the optional direct probe.",
+		Help: "PostgreSQL replay lag in seconds (clock_timestamp - pg_last_xact_replay_timestamp); inflated by primary idleness, prefer cnpg_ha_replica_lag_bytes for true behindness.",
+	}, []string{"hacluster", "namespace", "site"})
+
+	// ReplicaLagBytes is the WAL distance the site is behind the current
+	// primary in bytes, computed from the per-site LSNs published by the
+	// optional direct PostgreSQL probe. It is 0 on the current primary,
+	// 0 on a caught-up replica regardless of primary traffic, and only
+	// grows when there is actual streaming or apply backlog. The metric
+	// is cleared when no LSN is known for either side (probe disabled
+	// or transient connection failure).
+	ReplicaLagBytes = prometheus.NewGaugeVec(prometheus.GaugeOpts{
+		Name: subsystem + "_replica_lag_bytes",
+		Help: "WAL bytes the site is behind the current primary, computed from per-site LSN gaps; 0 on the primary and on caught-up replicas.",
 	}, []string{"hacluster", "namespace", "site"})
 
 	// SplitBrain is 1 when more than one site was observed as CNPG-primary
@@ -87,6 +102,7 @@ func MustRegister() {
 		SiteReachable,
 		SiteReady,
 		ReplicaLagSeconds,
+		ReplicaLagBytes,
 		SplitBrain,
 		FailoverTotal,
 		FailoverDurationSeconds,
@@ -117,6 +133,21 @@ func SetReplicaLag(haNamespace, haName, site string, seconds float64) {
 // reports a value for a site.
 func ClearReplicaLag(haNamespace, haName, site string) {
 	ReplicaLagSeconds.DeleteLabelValues(haName, haNamespace, site)
+}
+
+// SetReplicaLagBytes publishes the WAL byte gap for a site relative to the
+// current primary. Callers pass 0 on the current primary and on caught-up
+// replicas (a negative gap is impossible after the uint64 underflow guard
+// in the controller).
+func SetReplicaLagBytes(haNamespace, haName, site string, bytes float64) {
+	ReplicaLagBytes.WithLabelValues(haName, haNamespace, site).Set(bytes)
+}
+
+// ClearReplicaLagBytes removes a stale WAL gap gauge when the primary's
+// LSN or the site's LSN is unknown (probe disabled, transient failure,
+// site unreachable).
+func ClearReplicaLagBytes(haNamespace, haName, site string) {
+	ReplicaLagBytes.DeleteLabelValues(haName, haNamespace, site)
 }
 
 // SetSplitBrain publishes the split-brain gauge for one HACluster.

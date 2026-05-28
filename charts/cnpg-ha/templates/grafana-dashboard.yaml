@@ -235,15 +235,15 @@ data:
                   },
                   {
                     "color": "orange",
-                    "value": 300
+                    "value": 1048576
                   },
                   {
                     "color": "red",
-                    "value": 900
+                    "value": 67108864
                   }
                 ]
               },
-              "unit": "s"
+              "unit": "decbytes"
             },
             "overrides": []
           },
@@ -270,12 +270,12 @@ data:
           },
           "targets": [
             {
-              "expr": "max(cnpg_ha_replica_lag_seconds{namespace=~\"$namespace\",hacluster=~\"$hacluster\"})",
+              "expr": "max(cnpg_ha_replica_lag_bytes{namespace=~\"$namespace\",hacluster=~\"$hacluster\"})",
               "legendFormat": "max lag",
               "refId": "A"
             }
           ],
-          "title": "Max Replica Lag",
+          "title": "Max Replica Lag (bytes behind primary)",
           "type": "stat"
         },
         {
@@ -504,15 +504,15 @@ data:
                   },
                   {
                     "color": "orange",
-                    "value": 300
+                    "value": 1048576
                   },
                   {
                     "color": "red",
-                    "value": 900
+                    "value": 67108864
                   }
                 ]
               },
-              "unit": "s"
+              "unit": "decbytes"
             },
             "overrides": []
           },
@@ -540,12 +540,12 @@ data:
           },
           "targets": [
             {
-              "expr": "cnpg_ha_replica_lag_seconds{namespace=~\"$namespace\",hacluster=~\"$hacluster\"}",
+              "expr": "cnpg_ha_replica_lag_bytes{namespace=~\"$namespace\",hacluster=~\"$hacluster\"}",
               "legendFormat": "{{`{{namespace}}`}}/{{`{{hacluster}}`}} {{`{{site}}`}}",
               "refId": "A"
             }
           ],
-          "title": "Replica Lag",
+          "title": "Replica Lag (bytes behind primary)",
           "type": "timeseries"
         },
         {
