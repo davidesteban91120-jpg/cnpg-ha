@@ -90,13 +90,30 @@ ok "kube-prometheus-stack installed"
 
 # --- 2. swap the operator to a Helm release with monitoring on ------------
 # 40-failover.sh deploys the operator via Kustomize (config/default). Remove
-# that Deployment/RBAC (the CRD and the HACluster CR in namespace db are kept)
-# so the Helm release can own the controller without a name clash.
+# that Deployment/RBAC/Service so the Helm release can own the controller
+# without a name clash. The CRD and the HACluster CR in namespace db MUST
+# survive: a plain `kubectl delete -k config/default` cascade-deletes the CRD
+# (config/default's kustomization.yaml references ../crd), which wipes every
+# HACluster CR cluster-wide. The operator then has nothing to reconcile and
+# never observes its cnpg_ha_* gauges/counters -> the Grafana dashboard stays
+# blank. We render the kustomization and drop CustomResourceDefinition and
+# Namespace documents before deleting.
 if kubectl --context "$CTX_A" -n "$OP_NS" get deploy cnpg-ha-controller-manager >/dev/null 2>&1 \
    && ! kubectl --context "$CTX_A" -n "$OP_NS" get deploy cnpg-ha-controller-manager \
         -o jsonpath='{.metadata.labels.app\.kubernetes\.io/managed-by}' 2>/dev/null | grep -q Helm; then
-  log "removing Kustomize-deployed operator (keeping CRD + HACluster CR)"
-  kubectl --context "$CTX_A" delete -k "$REPO_ROOT/config/default" --ignore-not-found >/dev/null 2>&1 || true
+  log "removing Kustomize-deployed operator (CRD + Namespace + HACluster CR preserved)"
+  kubectl --context "$CTX_A" kustomize "$REPO_ROOT/config/default" 2>/dev/null \
+    | awk '
+        function flush() {
+          if (kind != "CustomResourceDefinition" && kind != "Namespace" && doc != "")
+            printf "%s---\n", doc
+          doc = ""; kind = ""
+        }
+        /^---[[:space:]]*$/ { flush(); next }
+        { doc = doc $0 ORS; if (/^kind:[[:space:]]+/) kind = $2 }
+        END { flush() }
+      ' \
+    | kubectl --context "$CTX_A" delete -f - --ignore-not-found >/dev/null 2>&1 || true
 fi
 
 # Ensure the operator image is available on site-a (40 already loaded it; load
