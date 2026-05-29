@@ -10,6 +10,7 @@
   ],
   "timezone": "Europe/Paris",
   "labels": ["dependencies"],
+  "commitBody": "Signed-off-by: renovate[bot] <29139614+renovate[bot]@users.noreply.github.com>",
   "prHourlyLimit": 4,
   "prConcurrentLimit": 10,
   "rebaseWhen": "behind-base-branch",
