@@ -868,6 +868,12 @@ func (r *HAClusterReconciler) publishMetrics(
 		} else {
 			hametrics.ClearSiteCurrentLSNBytes(ha.Namespace, ha.Name, obs.name)
 		}
+
+		if obs.lsnKnown && obs.lsn != "" {
+			hametrics.SetSiteLSNInfo(ha.Namespace, ha.Name, obs.name, obs.lsn)
+		} else {
+			hametrics.ClearSiteLSNInfo(ha.Namespace, ha.Name, obs.name)
+		}
 	}
 	hametrics.SetSplitBrain(ha.Namespace, ha.Name, splitBrain)
 }
