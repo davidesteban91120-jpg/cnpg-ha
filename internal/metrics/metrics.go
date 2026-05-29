@@ -81,6 +81,18 @@ var (
 		Help: "Absolute WAL position of the site in bytes (pg_current_wal_lsn on the primary, pg_last_wal_replay_lsn on a replica).",
 	}, []string{"hacluster", "namespace", "site"})
 
+	// SiteLSNInfo carries the same WAL position as SiteCurrentLSNBytes
+	// but renders it as the human-readable PostgreSQL pg_lsn string
+	// ("X/YYYYYYYY") in a label, so dashboards can show the canonical
+	// LSN as text rather than a raw byte count. The metric value is
+	// always 1; the information lives in the `lsn` label. Cardinality
+	// is held at one series per site by deleting any previous `lsn`
+	// label whenever the value changes (see SetSiteLSNInfo).
+	SiteLSNInfo = prometheus.NewGaugeVec(prometheus.GaugeOpts{
+		Name: subsystem + "_site_lsn_info",
+		Help: "Most recent WAL position of the site as a pg_lsn string carried in the `lsn` label; value is always 1.",
+	}, []string{"hacluster", "namespace", "site", "lsn"})
+
 	// SplitBrain is 1 when more than one site was observed as CNPG-primary
 	// and ready (writes may diverge), else 0.
 	SplitBrain = prometheus.NewGaugeVec(prometheus.GaugeOpts{
@@ -116,6 +128,7 @@ func MustRegister() {
 		ReplicaLagSeconds,
 		ReplicaLagBytes,
 		SiteCurrentLSNBytes,
+		SiteLSNInfo,
 		SplitBrain,
 		FailoverTotal,
 		FailoverDurationSeconds,
@@ -175,6 +188,29 @@ func SetSiteCurrentLSNBytes(haNamespace, haName, site string, bytes float64) {
 // is known for the site (probe disabled, unreachable, transient failure).
 func ClearSiteCurrentLSNBytes(haNamespace, haName, site string) {
 	SiteCurrentLSNBytes.DeleteLabelValues(haName, haNamespace, site)
+}
+
+// SetSiteLSNInfo publishes the site's WAL position as the human-readable
+// `lsn` label. To keep cardinality at one series per site we first delete
+// every previous (hacluster, namespace, site, *) tuple — otherwise every
+// distinct LSN string would leave a stale series behind on each reconcile.
+func SetSiteLSNInfo(haNamespace, haName, site, lsn string) {
+	SiteLSNInfo.DeletePartialMatch(prometheus.Labels{
+		"hacluster": haName,
+		"namespace": haNamespace,
+		"site":      site,
+	})
+	SiteLSNInfo.WithLabelValues(haName, haNamespace, site, lsn).Set(1)
+}
+
+// ClearSiteLSNInfo removes every label-tuple for a site when no LSN is
+// known (probe disabled, unreachable, transient failure).
+func ClearSiteLSNInfo(haNamespace, haName, site string) {
+	SiteLSNInfo.DeletePartialMatch(prometheus.Labels{
+		"hacluster": haName,
+		"namespace": haNamespace,
+		"site":      site,
+	})
 }
 
 // SetSplitBrain publishes the split-brain gauge for one HACluster.
