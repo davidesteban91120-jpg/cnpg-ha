@@ -1,0 +1,31 @@
+# Verifies every commit in a pull request carries a `Signed-off-by:`
+# trailer matching the PR author or another resolvable identity. The
+# trailer asserts the Developer Certificate of Origin 1.1
+# (https://developercertificate.org/). The check is enforced and must
+# pass before a PR can merge — see CONTRIBUTING.md.
+name: dco
+
+on:
+  pull_request:
+    branches: [main]
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: read
+  pull-requests: read
+
+jobs:
+  dco-check:
+    name: Verify Signed-off-by on every commit
+    runs-on: ubuntu-latest
+    steps:
+      - name: Get PR commits
+        id: pr-commits
+        uses: tim-actions/get-pr-commits@v1.3.1
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: DCO check
+        uses: tim-actions/dco@v1.1.0
+        with:
+          commits: ${{ steps.pr-commits.outputs.commits }}

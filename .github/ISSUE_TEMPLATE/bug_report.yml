@@ -1,0 +1,128 @@
+name: 🐛 Bug report
+description: Report a reproducible defect in cnpg-ha.
+title: "bug: <one-line summary>"
+labels: ["type/bug", "needs-triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to file a bug. Please complete every
+        section so we can act on this without a back-and-forth.
+
+        - If you have a question or are not sure this is a bug, open a
+          [Discussion](https://github.com/davidesteban91120-jpg/cnpg-ha/discussions) instead.
+        - For security vulnerabilities, follow the private process in
+          [`SECURITY.md`](https://github.com/davidesteban91120-jpg/cnpg-ha/blob/main/SECURITY.md).
+
+  - type: checkboxes
+    id: prereqs
+    attributes:
+      label: Before filing
+      options:
+        - label: I have searched [open and closed issues](https://github.com/davidesteban91120-jpg/cnpg-ha/issues?q=is%3Aissue) and Discussions and could not find this.
+          required: true
+        - label: I have read the [`CHANGELOG.md`](https://github.com/davidesteban91120-jpg/cnpg-ha/blob/main/CHANGELOG.md) for the version I am running.
+          required: true
+
+  - type: input
+    id: cnpg_ha_version
+    attributes:
+      label: cnpg-ha version
+      description: Release tag or `git describe` of `main`.
+      placeholder: v0.2.1 / main@abc1234
+    validations:
+      required: true
+
+  - type: input
+    id: cnpg_version
+    attributes:
+      label: CloudNative-PG version
+      placeholder: "1.24.0"
+    validations:
+      required: true
+
+  - type: input
+    id: k8s_version
+    attributes:
+      label: Kubernetes version
+      description: Output of `kubectl version --short` on every site.
+      placeholder: "v1.30.5"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: install_method
+    attributes:
+      label: Install method
+      options:
+        - Helm chart
+        - Kustomize (config/default)
+        - From source (make deploy)
+        - Other (describe in "What happened")
+    validations:
+      required: true
+
+  - type: textarea
+    id: what_happened
+    attributes:
+      label: What happened
+      description: Describe the observed behaviour. Include error messages verbatim.
+      placeholder: |
+        After triggering an automatic failover, the survivor's externalCluster
+        host was rewritten to pg-site-b-rw but `replica.source` still pointed
+        at the old externalCluster name "site-c", so streaming never resumed
+        and `cnpg_ha_replica_lag_bytes` stayed at ~64 MiB.
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: What you expected to happen
+    validations:
+      required: true
+
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Steps to reproduce
+      description: Minimum sequence that triggers the bug. Use the 3-site e2e if relevant.
+      placeholder: |
+        1. Run `00 → 50` (clean kind environment).
+        2. Trigger one automatic failover by deleting the CNPG cluster on the current primary site.
+        3. `kubectl --context kind-site-a -n db get cluster pg-prod -o jsonpath='{.spec.replica.source}'`
+    validations:
+      required: true
+
+  - type: textarea
+    id: hacluster_yaml
+    attributes:
+      label: Relevant `HACluster` and operator state
+      description: |
+        Paste a redacted excerpt — `spec` (without secret data) plus
+        `status.conditions` and `status.sites`.
+      render: yaml
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Operator logs
+      description: |
+        Relevant lines from `kubectl -n cnpg-ha-system logs deploy/cnpg-ha-controller-manager`.
+        Avoid pasting hundreds of lines — extract the reconcile that misbehaved.
+      render: shell
+
+  - type: textarea
+    id: metrics
+    attributes:
+      label: Metric values (if a dashboard panel is involved)
+      description: |
+        Output of the relevant `/metrics` series, e.g.
+        `cnpg_ha_replica_lag_bytes` / `cnpg_ha_site_lsn_info`.
+      render: shell
+
+  - type: textarea
+    id: anything_else
+    attributes:
+      label: Anything else
+      description: Workarounds tried, network topology specifics, suspected root cause.
