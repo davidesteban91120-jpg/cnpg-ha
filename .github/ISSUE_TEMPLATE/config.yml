@@ -1,0 +1,17 @@
+blank_issues_enabled: false
+contact_links:
+  - name: 💬 Questions, design discussion, "how do I…"
+    url: https://github.com/davidesteban91120-jpg/cnpg-ha/discussions
+    about: |
+      Open a thread in GitHub Discussions. Questions are answered there,
+      not in issues, so other users can find the answer later.
+  - name: 🔐 Security vulnerability
+    url: https://github.com/davidesteban91120-jpg/cnpg-ha/blob/main/SECURITY.md
+    about: |
+      Do NOT open a public issue for security vulnerabilities. Follow
+      the private reporting process in SECURITY.md.
+  - name: 📚 Documentation
+    url: https://github.com/davidesteban91120-jpg/cnpg-ha/tree/main/docs
+    about: |
+      Architecture, onboarding and operational guides. Worth reading
+      before filing a bug.

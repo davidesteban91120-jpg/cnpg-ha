@@ -1,0 +1,68 @@
+name: ✨ Feature request
+description: Propose a new behaviour or extension of cnpg-ha.
+title: "feat: <one-line summary>"
+labels: ["type/enhancement", "needs-triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for the suggestion. The more concrete the proposal, the
+        easier it is to act on. If you are not sure this fits cnpg-ha's
+        scope, open a [Discussion](https://github.com/davidesteban91120-jpg/cnpg-ha/discussions) first.
+
+  - type: checkboxes
+    id: prereqs
+    attributes:
+      label: Before filing
+      options:
+        - label: I have searched [open and closed issues](https://github.com/davidesteban91120-jpg/cnpg-ha/issues?q=is%3Aissue) and Discussions for an existing proposal.
+          required: true
+        - label: This belongs in cnpg-ha (not in CloudNative-PG upstream, not in a separate operator).
+          required: true
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem statement
+      description: |
+        Describe the user-visible problem you are trying to solve. Start
+        with the symptom, not the solution.
+      placeholder: |
+        On a low-traffic deployment the "Replica Lag" panel of the CNPG HA
+        dashboard looks like a ramp because cnpg_ha_replica_lag_seconds
+        derives from clock_timestamp() - pg_last_xact_replay_timestamp()
+        and grows on idle primaries, so on-call rotates a noisy alert.
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposed
+    attributes:
+      label: Proposed solution
+      description: How the behaviour should look from the user's side.
+      placeholder: |
+        Add a byte-based `cnpg_ha_replica_lag_bytes` gauge computed from
+        per-site LSNs and switch the dashboard panel + alert thresholds
+        to it. Keep the seconds gauge for backwards compatibility.
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: What did you try / consider that did not work, and why?
+
+  - type: textarea
+    id: api_impact
+    attributes:
+      label: API / chart / metric surface impact
+      description: |
+        New CRD fields, new Helm values, new metrics, new RBAC. Breaking
+        or backwards-compatible? If breaking, propose a migration path.
+
+  - type: textarea
+    id: anything_else
+    attributes:
+      label: Anything else
+      description: References to upstream issues, prior art, sketches.

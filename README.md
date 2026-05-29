@@ -204,15 +204,19 @@ Threat model, Kyverno / policy-controller policy samples, and full verification 
 
 ## Contributing
 
+Full workflow, conventions, tests and PR checklist: **[`CONTRIBUTING.md`](CONTRIBUTING.md)**.
+
+- Where to ask vs. where to file: [`SUPPORT.md`](SUPPORT.md).
+- Community standards: [`CODE_OF_CONDUCT.md`](CODE_OF_CONDUCT.md).
+- Vulnerabilities: report privately via [`SECURITY.md`](SECURITY.md), **not** in public issues.
 - Go code conventions: [`docs/CONVENTION.md`](docs/CONVENTION.md).
+- Every commit must be signed off with `git commit -s` (DCO enforced in CI).
 - Before you push: `make supply-chain-local` + `make test` (+ `make e2e-shared-ca` when you touch the failover path).
 - Install local hooks (gofmt, golangci-lint, gitleaks, hadolint, helm lint, conventional-commits):
 
   ```bash
   make precommit-install
   ```
-
-- Vulnerabilities: report privately via [`SECURITY.md`](SECURITY.md), no public issue.
 
 ## License
 
