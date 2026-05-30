@@ -35,6 +35,11 @@ linters:
     modernize:
       disable:
         - omitzero
+        # newexpr suggests `new(x)` for `ptr.To(x)` calls; correct for the
+        # zero value (`ptr.To(false)` → `new(bool)`) but wrong for every
+        # other literal (`new(true)` does not compile). Disable rather than
+        # carry per-line nolint directives on each non-zero ptr.To call.
+        - newexpr
   exclusions:
     generated: lax
     rules:
