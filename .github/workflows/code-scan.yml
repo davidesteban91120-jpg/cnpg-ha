@@ -68,7 +68,7 @@ jobs:
           category: gosec
       - name: Upload gosec SARIF (artifact, private-repo fallback)
         if: ${{ github.event.repository.private }}
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: gosec-sarif
           path: gosec.sarif
@@ -107,7 +107,7 @@ jobs:
           category: osv-scanner
       - name: Upload osv-scanner SARIF (artifact, private-repo fallback)
         if: ${{ always() && github.event.repository.private }}
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: osv-sarif
           path: osv.sarif
@@ -157,7 +157,7 @@ jobs:
           category: trivy-fs
       - name: Upload trivy fs SARIF (artifact, private-repo fallback)
         if: ${{ always() && github.event.repository.private }}
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: trivy-fs-sarif
           path: trivy-fs.sarif
