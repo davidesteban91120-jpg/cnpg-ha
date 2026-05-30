@@ -20,6 +20,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
+	"k8s.io/utils/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 )
 
@@ -356,15 +357,13 @@ func TestReconfigure(t *testing.T) {
 	})
 
 	t.Run("no externalClusters → error", func(t *testing.T) {
-		c := makeCluster("site-c", "pg-prod", boolp(true), nil)
+		c := makeCluster("site-c", "pg-prod", ptr.To(true), nil)
 		cli := fake.NewClientBuilder().WithScheme(scheme).WithObjects(c).Build()
 		if err := Reconfigure(ctx, cli, Ref{Namespace: "site-c", Name: "pg-prod"}, newHost); err == nil {
 			t.Fatalf("want error when no externalClusters to repoint")
 		}
 	})
 }
-
-func boolp(b bool) *bool { return &b }
 
 func TestExternalClusterIndex(t *testing.T) {
 	ext := func(name string) any {
